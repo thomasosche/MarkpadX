@@ -1,8 +1,33 @@
 name: markpad
+title: Markpad
 adopt-info: markpad
 icon: src-tauri/icons/128x128.png
 summary: The Notepad equivalent for Markdown
-description: A lightweight, fast, and beautiful markdown viewer and editor.
+description: |
+  A lightweight, minimalist Markdown viewer and text editor built for productivity across Windows, macOS, and Linux.
+  Features:
+  -   Tabbed interface
+  -   Monaco editor
+  -   Split view
+  -   Syntax highlighting both in editor and code blocks
+  -   Math equation support (KaTeX)
+  -   Mermaid diagram support
+  -   Vim mode
+  -   Auto-reload
+  -   Zen mode
+  -   Custom typography and font settings
+  -   Content zooming
+  -   Image and YouTube embeds
+  -   Familiar GitHub styled markdown rendering
+  -   Tiny memory usage (~10MB)
+  -   No telemetry or bloat
+  -   Free and open-source
+  -   Lightweight native UI
+license: BSD-3-Clause
+website: https://markpad.sftwr.dev
+donation: https://github.com/sponsors/alecdotdev
+source-code: https://github.com/alecdotdev/Markpad
+issues: https://github.com/alecdotdev/Markpad/issues
 
 confinement: strict
 base: core24
