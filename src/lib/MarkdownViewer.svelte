@@ -37,7 +37,7 @@
 	let isFocused = $state(true);
 	let markdownBody = $state<HTMLElement | null>(null);
 	let editorPane = $state<{ syncScrollToLine: (line: number, ratio?: number) => void } | null>(null);
-	let liveMode = $state(false);
+	let liveMode = $state(localStorage.getItem('liveMode') !== 'false');
 
 	let isDragging = $state(false);
 	let isProgrammaticScroll = false;
@@ -1011,6 +1011,7 @@
 
 	async function toggleLiveMode() {
 		liveMode = !liveMode;
+		localStorage.setItem('liveMode', String(liveMode));
 		if (liveMode && currentFile) {
 			await invoke('watch_file', { path: currentFile });
 			if (tabManager.activeTabId) await loadMarkdown(currentFile);

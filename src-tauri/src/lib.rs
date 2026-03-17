@@ -305,7 +305,15 @@ pub fn run() {
                 .expect("no main window")
                 .set_focus();
         }))
-        .plugin(tauri_plugin_prevent_default::init())
+        .plugin(
+            tauri_plugin_prevent_default::Builder::new()
+                .with_flags(
+                    tauri_plugin_prevent_default::Flags::all()
+                        - tauri_plugin_prevent_default::Flags::FIND
+                        - tauri_plugin_prevent_default::Flags::RELOAD,
+                )
+                .build(),
+        )
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(

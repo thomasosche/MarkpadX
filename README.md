@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="src-tauri/icons/128x128.png" width="128" alt="Markpad Icon" />
-  <h1>Markpad</h1>
-  <p><b>The Notepad equivalent for Markdown</b></p>
-  
+  <img src="src-tauri/icons/128x128.png" width="128" alt="MarkpadX Icon" />
+  <h1>MarkpadX</h1>
+  <p><b>Based on <a href="https://github.com/alecdotdev/Markpad">Markpad</a> — The Notepad equivalent for Markdown</b></p>
+
   [![GitHub Release](https://img.shields.io/github/v/release/alecdotdev/Markpad?style=flat-square)](https://github.com/alecdotdev/Markpad/releases/latest)
 
   <p>A lightweight, minimalist Markdown viewer and text editor built for productivity across Windows, macOS, and Linux.</p>
@@ -12,27 +12,48 @@
 
 <br />
 
+## New in MarkpadX
+
+### Preview Search
+- Ctrl+F / F3 to search within the rendered preview with highlighted matches
+- Navigate results with Enter / Shift+Enter or arrow buttons
+- Search-as-you-type from 3+ characters for performance on large documents
+- Case-sensitive toggle
+
+### Refresh & Live Reload
+- Ctrl+R / F5 to reload the current file from disk in preview mode
+- Live Mode enabled by default — auto-reloads when the file changes on disk
+- Live Mode setting persisted across sessions
+
+<br />
+
 ![demo](pics/demo.gif)
+
 ## Features
 
+### Editor
+- Monaco editor (VS Code engine)
+- Syntax highlighting in editor and code blocks
+- Vim mode
 - Tabbed interface
-- Monaco editor (VS Code)
-- Split view
-- Syntax highlighting both in editor and code blocks
+- Split view (side-by-side edit + preview)
+- Zen mode
+
+### Preview
+- Familiar GitHub-styled markdown rendering
 - Math equation support (KaTeX)
 - Mermaid diagram support
-- Vim mode
-- Auto-reload
-- Zen mode
+- Image and YouTube embeds
 - Custom typography and font settings
 - Content zooming
-- Image and YouTube embeds
-- Familiar GitHub styled markdown rendering
+
+### General
+- Auto-reload on file changes
+- Cross-platform (Windows, macOS, Linux)
+- Lightweight native UI
 - Tiny memory usage (~10MB)
 - No telemetry or bloat
 - Free and open-source
-- Lightweight native UI
-- Cross-platform (Windows, macOS, Linux)
 
 ## Installation
 
