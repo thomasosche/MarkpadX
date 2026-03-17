@@ -99,9 +99,12 @@
 	let previewSearchInputEl = $state<HTMLInputElement | null>(null);
 	let previewSearchHighlights: HTMLElement[] = [];
 
-	function openPreviewSearch() {
+	async function openPreviewSearch() {
+		// Refresh content from disk before searching to ensure we search the latest version
+		if (currentFile) await loadMarkdown(currentFile);
 		showPreviewSearch = true;
-		tick().then(() => previewSearchInputEl?.focus());
+		await tick();
+		previewSearchInputEl?.focus();
 	}
 
 	function closePreviewSearch() {
@@ -1198,6 +1201,20 @@
 		if (cmdOrCtrl && key === 'f' && !isEditing) {
 			e.preventDefault();
 			openPreviewSearch();
+		}
+		if (code === 'F3' && !isEditing) {
+			e.preventDefault();
+			if (!showPreviewSearch) {
+				openPreviewSearch();
+			} else if (e.shiftKey) {
+				previewSearchPrev();
+			} else {
+				previewSearchNext();
+			}
+		}
+		if ((cmdOrCtrl && key === 'r' && !isEditing) || (code === 'F5' && !isEditing)) {
+			e.preventDefault();
+			if (currentFile) loadMarkdown(currentFile);
 		}
 		if (cmdOrCtrl && key === 'e') {
 			e.preventDefault();
