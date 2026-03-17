@@ -1,13 +1,8 @@
 <div align="center">
   <img src="src-tauri/icons/128x128.png" width="128" alt="MarkpadX Icon" />
   <h1>MarkpadX</h1>
-  <p><b>Based on <a href="https://github.com/alecdotdev/Markpad">Markpad</a> — The Notepad equivalent for Markdown</b></p>
-
-  [![GitHub Release](https://img.shields.io/github/v/release/alecdotdev/Markpad?style=flat-square)](https://github.com/alecdotdev/Markpad/releases/latest)
-
-  <p>A lightweight, minimalist Markdown viewer and text editor built for productivity across Windows, macOS, and Linux.</p>
-
-  <a href="https://markpad.sftwr.dev">Website</a> // <a href="https://github.com/alecdotdev/Markpad/releases/latest">Download Latest Release</a> // <a href="https://github.com/alecdotdev/Markpad/issues">Report a Bug</a>
+  <p><b>A personal fork of <a href="https://github.com/alecdotdev/Markpad">Markpad</a> with additional features.</b></p>
+  <p>This is not an official release — it is intended to be built from source only.</p>
 </div>
 
 <br />
@@ -55,36 +50,12 @@
 - No telemetry or bloat
 - Free and open-source
 
-## Installation
-
-### Package Managers
-
-#### Windows (Chocolatey)
-
-```powershell
-choco install markpad-app --version=2.5.0 # version flag is temporary for now
-```
-
-#### Linux (Snap)
-
-```bash
-sudo snap install markpad 
-```
-
-### Direct Download
-
-Download the latest executable or installer from the [releases page](https://github.com/alecdotdev/Markpad/releases/latest) or from [markpad.sftwr.dev](https://markpad.sftwr.dev)
-
 ## Installation from source
 
 - Clone the repository
 - Run `npm install` to install dependencies
 - Run `npm run tauri build` to build the executable 
 - [Optional] Rename to `MarkpadInstaller.exe` to run as installer
-
-## Issues & Feedback
-
-If you find a bug, have a feature request, or just want to leave some feedback, please [open an issue](https://github.com/alecdotdev/Markpad/issues/new/choose). I'm actively developing Markpad and love hearing from users!
 
 ## Contributing
 
