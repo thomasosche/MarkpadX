@@ -90,6 +90,136 @@
 		if (markdownBody && !isEditing) renderRichContent();
 	});
 
+	// Preview search state
+	let showPreviewSearch = $state(false);
+	let previewSearchQuery = $state('');
+	let previewSearchCaseSensitive = $state(false);
+	let previewSearchMatches = $state<Range[]>([]);
+	let previewSearchCurrentIndex = $state(-1);
+	let previewSearchInputEl = $state<HTMLInputElement | null>(null);
+	let previewSearchHighlights: HTMLElement[] = [];
+
+	function openPreviewSearch() {
+		showPreviewSearch = true;
+		tick().then(() => previewSearchInputEl?.focus());
+	}
+
+	function closePreviewSearch() {
+		showPreviewSearch = false;
+		previewSearchQuery = '';
+		clearPreviewSearchHighlights();
+		previewSearchMatches = [];
+		previewSearchCurrentIndex = -1;
+	}
+
+	function clearPreviewSearchHighlights() {
+		for (const el of previewSearchHighlights) {
+			const parent = el.parentNode;
+			if (parent) {
+				while (el.firstChild) parent.insertBefore(el.firstChild, el);
+				parent.removeChild(el);
+				parent.normalize(); // merge adjacent text nodes split by previous highlights
+			}
+		}
+		previewSearchHighlights = [];
+	}
+
+	function performPreviewSearch() {
+		clearPreviewSearchHighlights();
+		previewSearchMatches = [];
+		previewSearchCurrentIndex = -1;
+
+		if (!previewSearchQuery || !markdownBody) return;
+
+		const query = previewSearchCaseSensitive ? previewSearchQuery : previewSearchQuery.toLowerCase();
+		const ranges: Range[] = [];
+		const walker = document.createTreeWalker(markdownBody, NodeFilter.SHOW_TEXT);
+
+		let node: Text | null;
+		while ((node = walker.nextNode() as Text | null)) {
+			const text = previewSearchCaseSensitive ? node.textContent! : node.textContent!.toLowerCase();
+			let startPos = 0;
+			let index: number;
+			while ((index = text.indexOf(query, startPos)) !== -1) {
+				const range = document.createRange();
+				range.setStart(node, index);
+				range.setEnd(node, index + query.length);
+				ranges.push(range);
+				startPos = index + query.length;
+			}
+		}
+
+		// Wrap each match in a highlight span (iterate in reverse to keep ranges valid)
+		for (let i = ranges.length - 1; i >= 0; i--) {
+			const span = document.createElement('mark');
+			span.className = 'preview-search-highlight';
+			span.dataset.matchIndex = String(i);
+			try {
+				ranges[i].surroundContents(span);
+				previewSearchHighlights.unshift(span);
+			} catch {
+				// Range spans multiple elements — fall back to extracting and re-inserting
+				const fragment = ranges[i].extractContents();
+				span.appendChild(fragment);
+				ranges[i].insertNode(span);
+				previewSearchHighlights.unshift(span);
+			}
+		}
+
+		previewSearchMatches = ranges;
+		if (ranges.length > 0) {
+			previewSearchCurrentIndex = 0;
+			scrollToPreviewMatch(0);
+		}
+	}
+
+	function scrollToPreviewMatch(index: number) {
+		const el = previewSearchHighlights[index];
+		if (!el) return;
+		// Remove active class from all, add to current
+		for (const h of previewSearchHighlights) h.classList.remove('preview-search-active');
+		el.classList.add('preview-search-active');
+		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
+
+	function previewSearchNext() {
+		if (previewSearchMatches.length === 0) return;
+		previewSearchCurrentIndex = (previewSearchCurrentIndex + 1) % previewSearchMatches.length;
+		scrollToPreviewMatch(previewSearchCurrentIndex);
+	}
+
+	function previewSearchPrev() {
+		if (previewSearchMatches.length === 0) return;
+		previewSearchCurrentIndex = (previewSearchCurrentIndex - 1 + previewSearchMatches.length) % previewSearchMatches.length;
+		scrollToPreviewMatch(previewSearchCurrentIndex);
+	}
+
+	function handlePreviewSearchInput() {
+		if (previewSearchQuery.length >= 3) {
+			performPreviewSearch();
+		} else {
+			// Clear highlights when query is too short
+			clearPreviewSearchHighlights();
+			previewSearchMatches = [];
+			previewSearchCurrentIndex = -1;
+		}
+	}
+
+	function handlePreviewSearchKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			closePreviewSearch();
+		} else if (e.key === 'Enter') {
+			if (previewSearchMatches.length === 0 && previewSearchQuery.length > 0) {
+				// Force search on Enter regardless of length
+				performPreviewSearch();
+			} else if (e.shiftKey) {
+				previewSearchPrev();
+			} else {
+				previewSearchNext();
+			}
+		}
+	}
+
 	// ui state
 	let tooltip = $state({ show: false, text: '', x: 0, y: 0 });
 	let caretEl: HTMLElement;
@@ -436,6 +566,14 @@
 		});
 	}
 
+	// One-way sync htmlContent into the article element (no bind:innerHTML to avoid
+	// Svelte clobbering DOM modifications like search highlights)
+	$effect(() => {
+		if (markdownBody && htmlContent !== undefined) {
+			markdownBody.innerHTML = htmlContent;
+		}
+	});
+
 	$effect(() => {
 		if (htmlContent && markdownBody && !isEditing && hljs && renderMathInElement && mermaid) renderRichContent();
 	});
@@ -716,6 +854,7 @@
 	async function toggleEdit(autoSave = false) {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
+		if (showPreviewSearch) closePreviewSearch();
 
 		if (isEditing) {
 			// Switch back to view
@@ -1055,6 +1194,10 @@
 		if (cmdOrCtrl && key === 'h') {
 			e.preventDefault();
 			if (tabManager.activeTabId) toggleSplitView(tabManager.activeTabId);
+		}
+		if (cmdOrCtrl && key === 'f' && !isEditing) {
+			e.preventDefault();
+			openPreviewSearch();
 		}
 		if (cmdOrCtrl && key === 'e') {
 			e.preventDefault();
@@ -1505,11 +1648,44 @@
 
 					<!-- Viewer Pane -->
 					<div class="pane viewer-pane" class:active={!isEditing || isSplit} style="flex: {isSplit ? 1 - tabManager.activeTab.splitRatio : !isEditing ? 1 : 0}">
+						{#if showPreviewSearch}
+							<div class="preview-search-bar" transition:fly={{ y: -30, duration: 150 }}>
+								<div class="preview-search-inner">
+									<svg class="preview-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+									<input
+										bind:this={previewSearchInputEl}
+										bind:value={previewSearchQuery}
+										oninput={() => handlePreviewSearchInput()}
+										onkeydown={handlePreviewSearchKeydown}
+										placeholder="Find in preview (3+ chars)..."
+										class="preview-search-input"
+										spellcheck="false" />
+									<span class="preview-search-count">
+										{#if previewSearchMatches.length > 0}
+											{previewSearchCurrentIndex + 1} / {previewSearchMatches.length}
+										{:else if previewSearchQuery}
+											No results
+										{/if}
+									</span>
+									<button class="preview-search-btn" onclick={previewSearchPrev} title="Previous (Shift+Enter)" disabled={previewSearchMatches.length === 0}>
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+									</button>
+									<button class="preview-search-btn" onclick={previewSearchNext} title="Next (Enter)" disabled={previewSearchMatches.length === 0}>
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+									</button>
+									<button class="preview-search-btn preview-search-case" class:active={previewSearchCaseSensitive} onclick={() => { previewSearchCaseSensitive = !previewSearchCaseSensitive; handlePreviewSearchInput(); }} title="Case sensitive">
+										Aa
+									</button>
+									<button class="preview-search-btn" onclick={closePreviewSearch} title="Close (Esc)">
+										<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+									</button>
+								</div>
+							</div>
+						{/if}
 						<article
 							bind:this={markdownBody}
 							contenteditable="false"
 							class="markdown-body {isFullWidth ? 'full-width' : ''}"
-							bind:innerHTML={htmlContent}
 							onscroll={handleScroll}
 							tabindex="-1"
 							style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px;">
@@ -1870,5 +2046,103 @@
 		/* Legacy mapping */
 		width: 100%;
 		height: 100%;
+	}
+
+	/* Preview Search */
+	.preview-search-bar {
+		position: absolute;
+		top: 0;
+		right: 16px;
+		z-index: 200;
+		padding: 6px;
+	}
+
+	.preview-search-inner {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		background: var(--color-canvas-subtle, #161b22);
+		border: 1px solid var(--color-border-default);
+		border-radius: 6px;
+		padding: 4px 8px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+		font-family: var(--win-font);
+	}
+
+	.preview-search-icon {
+		color: var(--color-fg-muted);
+		flex-shrink: 0;
+	}
+
+	.preview-search-input {
+		background: transparent;
+		border: none;
+		outline: none;
+		color: var(--color-fg-default);
+		font-size: 13px;
+		font-family: var(--win-font);
+		width: 200px;
+		padding: 2px 4px;
+	}
+
+	.preview-search-input::placeholder {
+		color: var(--color-fg-muted);
+	}
+
+	.preview-search-count {
+		font-size: 11px;
+		color: var(--color-fg-muted);
+		white-space: nowrap;
+		min-width: 60px;
+		text-align: center;
+	}
+
+	.preview-search-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: 4px;
+		color: var(--color-fg-muted);
+		cursor: pointer;
+		padding: 3px;
+		transition: all 0.1s;
+	}
+
+	.preview-search-btn:hover:not(:disabled) {
+		background: var(--color-neutral-muted);
+		color: var(--color-fg-default);
+	}
+
+	.preview-search-btn:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+
+	.preview-search-case {
+		font-size: 12px;
+		font-weight: 600;
+		padding: 2px 5px;
+		font-family: var(--win-font);
+	}
+
+	.preview-search-case.active {
+		background: var(--color-accent-fg);
+		color: #fff;
+		border-color: var(--color-accent-fg);
+		border-radius: 4px;
+	}
+
+	:global(.preview-search-highlight) {
+		background-color: rgba(255, 200, 0, 0.35);
+		border-radius: 2px;
+		padding: 0 1px;
+	}
+
+	:global(.preview-search-highlight.preview-search-active) {
+		background-color: rgba(255, 165, 0, 0.7);
+		outline: 2px solid rgba(255, 165, 0, 0.9);
+		border-radius: 2px;
 	}
 </style>
