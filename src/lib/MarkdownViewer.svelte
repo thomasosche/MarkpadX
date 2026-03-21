@@ -1071,7 +1071,17 @@
 			const rawHref = anchor.getAttribute('href');
 			if (!rawHref) return;
 
-			if (rawHref.startsWith('#')) return;
+			// Anchor links: scroll within the preview article
+			if (rawHref.startsWith('#') && markdownBody) {
+				event.preventDefault();
+				const targetId = rawHref.slice(1);
+				const targetEl = markdownBody.querySelector(`[id="${CSS.escape(targetId)}"]`);
+				if (targetEl) {
+					targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
+				return;
+			}
+
 			const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
 				const urlNoHash = rawHref.split('#')[0].split('?')[0];
 				return urlNoHash.toLowerCase().endsWith(ext);
