@@ -301,10 +301,11 @@ pub fn run() {
                     .expect("no main window")
                     .emit("file-path", resolved_path);
             }
-            let _ = app
+            let window = app
                 .get_webview_window("main")
-                .expect("no main window")
-                .set_focus();
+                .expect("no main window");
+            let _ = window.unminimize();
+            let _ = window.set_focus();
         }))
         .plugin(
             tauri_plugin_prevent_default::Builder::new()

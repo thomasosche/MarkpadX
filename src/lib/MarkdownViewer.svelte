@@ -55,7 +55,7 @@
 	let sanitizedHtml = $derived(DOMPurify.sanitize(htmlContent));
 	let scrollTop = $derived(tabManager.activeTab?.scrollTop ?? 0);
 	let isScrolled = $derived(scrollTop > 0);
-	let windowTitle = $derived(tabManager.activeTab?.title ?? 'Markpad');
+	let windowTitle = $derived(tabManager.activeTab?.title ?? 'MarkpadX');
 	let isScrollSynced = $derived(tabManager.activeTab?.isScrollSynced ?? false);
 
 	let showHome = $state(false);
@@ -1049,10 +1049,27 @@
 		while (target && target.tagName !== 'A' && target !== document.body) target = target.parentElement as HTMLElement;
 		if (target?.tagName === 'A') {
 			const anchor = target as HTMLAnchorElement;
-			if (anchor.href) {
-				const rect = anchor.getBoundingClientRect();
-				tooltip = { show: true, text: anchor.href, x: rect.left + rect.width / 2, y: rect.top - 8 };
+			const rawHref = anchor.getAttribute('href');
+			if (!rawHref) return;
+
+			let tooltipText = anchor.href;
+			if (rawHref.startsWith('#')) {
+				tooltipText = rawHref;
+			} else if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
+				tooltipText = resolvePath(currentFile, rawHref.slice(0, -1));
+			} else {
+				const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
+					const urlNoHash = rawHref.split('#')[0].split('?')[0];
+					return urlNoHash.toLowerCase().endsWith(ext);
+				});
+				if (isMarkdown && !rawHref.match(/^[a-z]+:\/\//i)) {
+					const urlNoHash = rawHref.split('#')[0].split('?')[0];
+					tooltipText = resolvePath(currentFile, urlNoHash);
+				}
 			}
+
+			const rect = anchor.getBoundingClientRect();
+			tooltip = { show: true, text: tooltipText, x: rect.left + rect.width / 2, y: rect.top - 8 };
 		}
 	}
 
@@ -1082,6 +1099,18 @@
 				return;
 			}
 
+			// Folder links: open in system file explorer
+			if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
+				event.preventDefault();
+				const resolved = resolvePath(currentFile, rawHref.slice(0, -1));
+				try {
+					await invoke('open_file_folder', { path: resolved });
+				} catch (e) {
+					console.error('Failed to open folder:', e);
+				}
+				return;
+			}
+
 			const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
 				const urlNoHash = rawHref.split('#')[0].split('?')[0];
 				return urlNoHash.toLowerCase().endsWith(ext);
@@ -1091,7 +1120,8 @@
 				event.preventDefault();
 				const urlNoHash = rawHref.split('#')[0].split('?')[0];
 				const resolved = resolvePath(currentFile, urlNoHash);
-				await loadMarkdown(resolved, { navigate: true });
+				console.log('[link-click] md link:', rawHref, '→ resolved:', resolved, '(base:', currentFile, ')');
+				await loadMarkdown(resolved);
 				return;
 			}
 
@@ -1297,7 +1327,7 @@
 		const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
 		const webview = new WebviewWindow(label, {
 			url: 'index.html?file=' + encodeURIComponent(path),
-			title: 'Markpad - ' + path.split(/[/\\]/).pop(),
+			title: 'MarkpadX - ' + path.split(/[/\\]/).pop(),
 			width: 1000,
 			height: 800,
 		});
@@ -1390,9 +1420,15 @@
 			);
 
 			unlisteners.push(
-				await listen('file-path', (event) => {
+				await listen('file-path', async (event) => {
 					const filePath = event.payload as string;
-					if (filePath) loadMarkdown(filePath);
+					if (filePath) {
+						const { getCurrentWindow } = await import('@tauri-apps/api/window');
+						const win = getCurrentWindow();
+						await win.unminimize();
+						await win.setFocus();
+						loadMarkdown(filePath);
+					}
 				}),
 			);
 			unlisteners.push(
@@ -1714,6 +1750,7 @@
 							bind:this={markdownBody}
 							contenteditable="false"
 							class="markdown-body {isFullWidth ? 'full-width' : ''}"
+							onclick={handleDocumentClick}
 							onscroll={handleScroll}
 							tabindex="-1"
 							style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px;">

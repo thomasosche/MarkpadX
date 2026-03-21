@@ -15,6 +15,12 @@
 - Search-as-you-type from 3+ characters for performance on large documents
 - Case-sensitive toggle
 
+### Preview Link Navigation
+- Clickable `#anchor` links in preview that smoothly scroll to the target heading
+- GitHub-style heading IDs generated automatically
+- Links to `.md` files open in a new tab (resolved relative to the current file)
+- Links to folders (ending with `/`) open in Windows Explorer
+
 ### Refresh & Live Reload
 - Ctrl+R / F5 to reload the current file from disk in preview mode
 - Live Mode enabled by default — auto-reloads when the file changes on disk

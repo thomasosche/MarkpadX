@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { getVersion } from '@tauri-apps/api/app';
 	import { onMount } from 'svelte';
+	declare const __BUILD_DATE__: string;
 
 	let { recentFiles, onselectFile, onloadFile, onremoveRecentFile, onnewFile } = $props<{
 		recentFiles: string[];
@@ -10,15 +10,7 @@
 		onnewFile: () => void;
 	}>();
 
-	let version = $state('');
-
-	onMount(async () => {
-		try {
-			version = await getVersion();
-		} catch (e) {
-			console.error('Failed to get version:', e);
-		}
-	});
+	let version = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : '';
 
 	function getFileName(path: string) {
 		return path.split(/[/\\]/).pop() || path;
@@ -107,7 +99,7 @@
 		{/if}
 	</div>
 </div>
-<div class="version-tag">v{version}</div>
+<div class="version-tag">{version}</div>
 
 <style>
 	.message {

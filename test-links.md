@@ -44,3 +44,15 @@ npm install markpadx
 A: Yes! Clicking a `#section` link scrolls to the matching heading.
 
 [Back to Top](#link--anchor-test)
+
+---
+
+## Link Tests
+
+### Link to another markdown file (opens in new tab)
+
+[Open test-linked.md](test-linked.md)
+
+### Link to a folder (opens in Windows Explorer)
+
+[Open test-folder/](test-folder/)

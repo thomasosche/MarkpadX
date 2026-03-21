@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
-	import { getVersion } from '@tauri-apps/api/app';
+	declare const __BUILD_DATE__: string;
 	import { settings, DEFAULT_FONTS, type OSType } from '../stores/settings.svelte.js';
 	import { fade, scale } from 'svelte/transition';
 
@@ -16,7 +16,7 @@
 	let loaded = $state(false);
 	let settingsModal = $state<HTMLDivElement>();
 	let previousActiveElement = $state<HTMLElement | null>(null);
-	let appVersion = $state<string>('');
+	let appVersion = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : '';
 	let osType = $state<OSType>('unknown');
 	let defaultFonts = $derived(DEFAULT_FONTS[osType] || DEFAULT_FONTS.unknown);
 
@@ -45,11 +45,6 @@
 	$effect(() => {
 		if (show) {
 			loadFonts();
-			if (!appVersion) {
-				getVersion()
-					.then((v) => (appVersion = v))
-					.catch(console.error);
-			}
 			previousActiveElement = document.activeElement as HTMLElement;
 			setTimeout(() => {
 				const firstFocusable = settingsModal?.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') as HTMLElement | null;
@@ -184,8 +179,8 @@
 							class="github-btn"
 							onclick={() =>
 								import('@tauri-apps/plugin-opener')
-									.then((m) => m.openUrl('https://github.com/alecdotdev/Markpad'))
-									.catch(() => window.open('https://github.com/alecdotdev/Markpad', '_blank'))}
+									.then((m) => m.openUrl('https://github.com/thomasosche/MarkpadX'))
+									.catch(() => window.open('https://github.com/thomasosche/MarkpadX', '_blank'))}
 							aria-label="GitHub">
 							<svg viewBox="0 0 24 24" class="github-icon" fill="currentColor">
 								<path
@@ -194,7 +189,7 @@
 							</svg>
 							<span>GitHub</span>
 							{#if appVersion}
-								<span class="version-code">v{appVersion}</span>
+								<span class="version-code">{appVersion}</span>
 							{/if}
 						</button>
 					</div>

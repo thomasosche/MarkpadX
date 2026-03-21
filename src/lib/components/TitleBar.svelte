@@ -7,7 +7,7 @@
 	import TabList from './TabList.svelte';
 	import { tabManager } from '../stores/tabs.svelte.js';
 	import { settings } from '../stores/settings.svelte.js';
-	import { getVersion } from '@tauri-apps/api/app';
+	declare const __BUILD_DATE__: string;
 
 	let {
 		isFocused,
@@ -209,15 +209,7 @@
 	let themeMenuOpen = $state(false);
 	let kebabMenuOpen = $state(false);
 	let homeMenuOpen = $state(false);
-	let appVersion = $state('');
-
-	$effect(() => {
-		getVersion()
-			.then((v) => {
-				appVersion = v;
-			})
-			.catch(console.error);
-	});
+	let appVersion = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : '';
 
 	function handleSetTheme(t: 'system' | 'dark' | 'light') {
 		if (onSetTheme) onSetTheme(t);
@@ -373,10 +365,10 @@
 						onclick={() => {
 							homeMenuOpen = false;
 							import('@tauri-apps/plugin-opener')
-								.then((m) => m.openUrl('https://github.com/alecdotdev/Markpad'))
-								.catch(() => window.open('https://github.com/alecdotdev/Markpad', '_blank'));
+								.then((m) => m.openUrl('https://github.com/thomasosche/MarkpadX'))
+								.catch(() => window.open('https://github.com/thomasosche/MarkpadX', '_blank'));
 						}}>
-						v{appVersion}
+						{appVersion}
 					</button>
 				</div>
 			{/if}
