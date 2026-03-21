@@ -1056,7 +1056,7 @@
 			if (rawHref.startsWith('#')) {
 				tooltipText = rawHref;
 			} else if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
-				tooltipText = resolvePath(currentFile, rawHref.slice(0, -1));
+				tooltipText = resolvePath(currentFile, decodeURIComponent(rawHref.slice(0, -1)));
 			} else {
 				const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
 					const urlNoHash = rawHref.split('#')[0].split('?')[0];
@@ -1064,7 +1064,7 @@
 				});
 				if (isMarkdown && !rawHref.match(/^[a-z]+:\/\//i)) {
 					const urlNoHash = rawHref.split('#')[0].split('?')[0];
-					tooltipText = resolvePath(currentFile, urlNoHash);
+					tooltipText = resolvePath(currentFile, decodeURIComponent(urlNoHash));
 				}
 			}
 
@@ -1102,7 +1102,8 @@
 			// Folder links: open in system file explorer
 			if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
 				event.preventDefault();
-				const resolved = resolvePath(currentFile, rawHref.slice(0, -1));
+				const decoded = decodeURIComponent(rawHref.slice(0, -1));
+				const resolved = resolvePath(currentFile, decoded);
 				try {
 					await invoke('open_file_folder', { path: resolved });
 				} catch (e) {
@@ -1119,8 +1120,8 @@
 			if (isMarkdown && !rawHref.match(/^[a-z]+:\/\//i)) {
 				event.preventDefault();
 				const urlNoHash = rawHref.split('#')[0].split('?')[0];
-				const resolved = resolvePath(currentFile, urlNoHash);
-				console.log('[link-click] md link:', rawHref, '→ resolved:', resolved, '(base:', currentFile, ')');
+				const decoded = decodeURIComponent(urlNoHash);
+				const resolved = resolvePath(currentFile, decoded);
 				await loadMarkdown(resolved);
 				return;
 			}
@@ -1287,6 +1288,20 @@
 		if (cmdOrCtrl && key === '0') {
 			e.preventDefault();
 			zoomLevel = 100;
+		}
+		if (!isEditing && !isSplit && key === 'arrowleft' && !cmdOrCtrl && !e.shiftKey) {
+			e.preventDefault();
+			if (tabManager.activeTabId) {
+				const path = tabManager.goBack(tabManager.activeTabId);
+				if (path) loadMarkdown(path, { skipTabManagement: true });
+			}
+		}
+		if (!isEditing && !isSplit && key === 'arrowright' && !cmdOrCtrl && !e.shiftKey) {
+			e.preventDefault();
+			if (tabManager.activeTabId) {
+				const path = tabManager.goForward(tabManager.activeTabId);
+				if (path) loadMarkdown(path, { skipTabManagement: true });
+			}
 		}
 	}
 
