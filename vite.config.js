@@ -8,7 +8,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
   define: {
-    __BUILD_DATE__: JSON.stringify(new Date().toISOString().replace('T', ' ').slice(0, 16)),
+    __BUILD_DATE__: JSON.stringify(new Date().toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })),
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
