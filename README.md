@@ -16,10 +16,12 @@
 - Case-sensitive toggle
 
 ### Preview Link Navigation
-- Clickable `#anchor` links in preview that smoothly scroll to the target heading
-- GitHub-style heading IDs generated automatically
-- Links to `.md` files open in a new tab (resolved relative to the current file)
-- Links to folders (ending with `/`) open in Windows Explorer
+Clickable links in the rendered preview — all paths are resolved relative to the current file:
+- **Anchor links** (`[Section](#section)`) — smoothly scrolls to the target heading within the document
+- **Markdown file links** (`[Notes](notes.md)`) — opens the linked `.md` file in a new tab
+- **Folder links** (`[Docs](docs/)`) — opens the folder in Windows Explorer
+- **HTTP links** — opens in the default browser
+- Hovering any link shows a tooltip with the resolved target path
 
 ### Refresh & Live Reload
 - Ctrl+R / F5 to reload the current file from disk in preview mode
