@@ -593,7 +593,11 @@ import { t } from './utils/i18n.js';
 			if (options.navigate && tabManager.activeTab) {
 				tabManager.navigate(tabManager.activeTab.id, filePath);
 			} else if (!options.skipTabManagement) {
-				const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+				const isWin = typeof navigator !== 'undefined' && /^Win/.test(navigator.platform);
+				const norm = (p: string) => {
+					const s = p.replace(/\\/g, '/');
+					return isWin ? s.toLowerCase() : s;
+				};
 				const target = norm(filePath);
 				existing = tabManager.tabs.find((t) => t.path && norm(t.path) === target);
 				if (existing) {
@@ -1710,14 +1714,13 @@ import { t } from './utils/i18n.js';
 		if (mode !== 'app') return;
 		if ((event as any).__markpadHandled) return;
 		(event as any).__markpadHandled = true;
+		tooltip.show = false;
 		let target = event.target as HTMLElement;
 		while (target && target.tagName !== 'A' && target !== document.body) target = target.parentElement as HTMLElement;
 		if (target?.tagName === 'A') {
 			const anchor = target as HTMLAnchorElement;
 			const rawHref = anchor.getAttribute('href');
 			if (!rawHref) return;
-
-			tooltip.show = false;
 
 			// Anchor links: scroll within the preview article
 			if (rawHref.startsWith('#') && markdownBody) {
@@ -1975,7 +1978,10 @@ import { t } from './utils/i18n.js';
 			const id = from.pop()!;
 			if (id === current) continue;
 			if (!tabManager.tabs.find((t) => t.id === id)) continue;
-			if (current) to.push(current);
+			if (current) {
+				to.push(current);
+				if (to.length > 100) to.shift();
+			}
 			suppressTabHistory = true;
 			tabManager.setActive(id);
 			return true;
