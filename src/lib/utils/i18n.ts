@@ -63,6 +63,9 @@ export function getSupportedLanguages() {
 
 export const translations: Record<LanguageCode, Translation> = {
     en: {
+        shortcuts: {
+            title: 'Keyboard Shortcuts',
+        },
         settings: {
             title: 'Settings',
             editor: 'Editor',

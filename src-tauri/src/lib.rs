@@ -753,34 +753,32 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            println!("Single Instance Args: {:?}", args);
-
             let path_str = args
                 .iter()
                 .skip(1)
-                .find(|a| !a.starts_with("-"))
+                .find(|a| !a.starts_with("--") && !a.eq_ignore_ascii_case("-"))
                 .map(|a| a.as_str())
                 .unwrap_or("");
+
+            let window = app
+                .get_webview_window("main")
+                .or_else(|| app.get_webview_window("installer"));
 
             if !path_str.is_empty() {
                 let path = std::path::Path::new(path_str);
                 let resolved_path = if path.is_absolute() {
                     path_str.to_string()
                 } else {
-                    let cwd_path = std::path::Path::new(&cwd);
-                    cwd_path.join(path).display().to_string()
+                    std::path::Path::new(&cwd).join(path).display().to_string()
                 };
-
-                let _ = app
-                    .get_webview_window("main")
-                    .expect("no main window")
-                    .emit("file-path", resolved_path);
+                let _ = app.emit("file-path", resolved_path);
             }
-            let window = app
-                .get_webview_window("main")
-                .expect("no main window");
-            let _ = window.unminimize();
-            let _ = window.set_focus();
+
+            if let Some(window) = window {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
         }))
         .plugin(
             tauri_plugin_prevent_default::Builder::new()

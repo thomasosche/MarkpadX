@@ -56,3 +56,7 @@ A: Yes! Clicking a `#section` link scrolls to the matching heading.
 ### Link to a folder (opens in Windows Explorer)
 
 [Open test-folder/](test-folder/)
+
+### External HTTP link (opens in default browser)
+
+<a href="https://carrybit.de">carrybit.de</a>

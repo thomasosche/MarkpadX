@@ -24,6 +24,7 @@ import { processMarkdownHtml } from './utils/markdown';
 
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
+	import Shortcuts from './components/Shortcuts.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
 import { settings } from './stores/settings.svelte.js';
 import { t } from './utils/i18n.js';
@@ -40,6 +41,7 @@ import { t } from './utils/i18n.js';
 	let mode = $state<'loading' | 'app' | 'installer' | 'uninstall'>('loading');
 
 	let showSettings = $state(false);
+	let showShortcuts = $state(false);
 
 	let uiLanguage = $state(settings.language);
 
@@ -91,6 +93,23 @@ import { t } from './utils/i18n.js';
 	// in-page scroll position history for mouse 4/5 nav
 	let scrollHistory: number[] = [];
 	let scrollFuture: number[] = [];
+
+	// MRU tab activation history for back/forward across tabs
+	let tabBackStack: string[] = [];
+	let tabForwardStack: string[] = [];
+	let suppressTabHistory = false;
+	let lastActiveTabId: string | null = null;
+	$effect(() => {
+		const id = tabManager.activeTabId;
+		if (id === lastActiveTabId) return;
+		if (lastActiveTabId && !suppressTabHistory) {
+			tabBackStack.push(lastActiveTabId);
+			if (tabBackStack.length > 100) tabBackStack.shift();
+			tabForwardStack = [];
+		}
+		suppressTabHistory = false;
+		lastActiveTabId = id;
+	});
 	let collapsedHeaders = $state(new Set<string>());
 	let zoomData = $state<{ src?: string; html?: string } | null>(null);
 
@@ -574,9 +593,12 @@ import { t } from './utils/i18n.js';
 			if (options.navigate && tabManager.activeTab) {
 				tabManager.navigate(tabManager.activeTab.id, filePath);
 			} else if (!options.skipTabManagement) {
-				existing = tabManager.tabs.find((t) => t.path === filePath);
+				const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+				const target = norm(filePath);
+				existing = tabManager.tabs.find((t) => t.path && norm(t.path) === target);
 				if (existing) {
 					tabManager.setActive(existing.id);
+					filePath = existing.path;
 				} else if (tabManager.activeTab && tabManager.activeTab.path === '' && !tabManager.activeTab.isDirty && tabManager.activeTab.rawContent.trim() === '') {
 					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
 				} else {
@@ -1686,6 +1708,8 @@ import { t } from './utils/i18n.js';
 
 	async function handleDocumentClick(event: MouseEvent) {
 		if (mode !== 'app') return;
+		if ((event as any).__markpadHandled) return;
+		(event as any).__markpadHandled = true;
 		let target = event.target as HTMLElement;
 		while (target && target.tagName !== 'A' && target !== document.body) target = target.parentElement as HTMLElement;
 		if (target?.tagName === 'A') {
@@ -1915,21 +1939,23 @@ import { t } from './utils/i18n.js';
 		}
 		if (!isEditing && !isSplit && key === 'arrowleft' && !cmdOrCtrl && !e.shiftKey) {
 			e.preventDefault();
-			if (tabManager.activeTabId) {
-				const path = tabManager.goBack(tabManager.activeTabId);
-				if (path) loadMarkdown(path, { skipTabManagement: true });
-			}
+			const tabs = tabManager.tabs;
+			const idx = tabs.findIndex((t) => t.id === tabManager.activeTabId);
+			if (idx > 0) tabManager.setActive(tabs[idx - 1].id);
 		}
 		if (!isEditing && !isSplit && key === 'arrowright' && !cmdOrCtrl && !e.shiftKey) {
 			e.preventDefault();
-			if (tabManager.activeTabId) {
-				const path = tabManager.goForward(tabManager.activeTabId);
-				if (path) loadMarkdown(path, { skipTabManagement: true });
-			}
+			const tabs = tabManager.tabs;
+			const idx = tabs.findIndex((t) => t.id === tabManager.activeTabId);
+			if (idx >= 0 && idx < tabs.length - 1) tabManager.setActive(tabs[idx + 1].id);
 		}
 		if (cmdOrCtrl && key === ',') {
 			e.preventDefault();
 			showSettings = !showSettings;
+		}
+		if (!isEditing && !cmdOrCtrl && (key === '?' || (e.shiftKey && key === '/'))) {
+			e.preventDefault();
+			showShortcuts = !showShortcuts;
 		}
 	}
 
@@ -1939,6 +1965,20 @@ import { t } from './utils/i18n.js';
 			scrollFuture = [];
 			if (scrollHistory.length > 50) scrollHistory.shift();
 		}
+	}
+
+	function activateTabFromStack(from: string[], to: string[]) {
+		const current = tabManager.activeTabId;
+		while (from.length > 0) {
+			const id = from.pop()!;
+			if (id === current) continue;
+			if (!tabManager.tabs.find((t) => t.id === id)) continue;
+			if (current) to.push(current);
+			suppressTabHistory = true;
+			tabManager.setActive(id);
+			return true;
+		}
+		return false;
 	}
 
 	function handleMouseUp(e: MouseEvent) {
@@ -1951,9 +1991,8 @@ import { t } from './utils/i18n.js';
 				const pos = scrollHistory.pop()!;
 				isProgrammaticScroll = true;
 				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
-			} else if (tabManager.activeTabId) {
-				const path = tabManager.goBack(tabManager.activeTabId);
-				if (path) loadMarkdown(path, { skipTabManagement: true });
+			} else {
+				activateTabFromStack(tabBackStack, tabForwardStack);
 			}
 		} else if (e.button === 4) {
 			// Forward
@@ -1963,9 +2002,8 @@ import { t } from './utils/i18n.js';
 				const pos = scrollFuture.pop()!;
 				isProgrammaticScroll = true;
 				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
-			} else if (tabManager.activeTabId) {
-				const path = tabManager.goForward(tabManager.activeTabId);
-				if (path) loadMarkdown(path, { skipTabManagement: true });
+			} else {
+				activateTabFromStack(tabForwardStack, tabBackStack);
 			}
 		}
 	}
@@ -2118,13 +2156,25 @@ import { t } from './utils/i18n.js';
 
 			unlisteners.push(
 				await listen('file-path', async (event) => {
-					const filePath = event.payload as string;
-					if (filePath) {
+					const raw: any = (event as any).payload;
+					let filePath = '';
+					if (typeof raw === 'string') filePath = raw;
+					else if (raw && typeof raw === 'object' && typeof raw.path === 'string') filePath = raw.path;
+					else if (raw != null) filePath = String(raw);
+					filePath = filePath.trim();
+					if (!filePath) return;
+					try {
 						const { getCurrentWindow } = await import('@tauri-apps/api/window');
 						const win = getCurrentWindow();
 						await win.unminimize();
 						await win.setFocus();
-						loadMarkdown(filePath);
+					} catch (e) {
+						console.error('[file-path] focus failed:', e);
+					}
+					try {
+						await loadMarkdown(filePath);
+					} catch (e) {
+						console.error('[file-path] loadMarkdown threw:', e);
 					}
 				}),
 			);
@@ -2410,6 +2460,8 @@ import { t } from './utils/i18n.js';
 		oncloseTab={closeTabAndWindowIfLast} />
 
 	<Settings show={showSettings} {theme} onSetTheme={(t) => (theme = t)} onclose={() => (showSettings = false)} />
+
+	<Shortcuts show={showShortcuts} onclose={() => (showShortcuts = false)} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
 			<div
