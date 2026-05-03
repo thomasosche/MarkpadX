@@ -4,6 +4,7 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { onMount, tick, untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import { openUrl } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
 	import Installer from './Installer.svelte';
@@ -13,16 +14,23 @@
 	import Editor from './components/Editor.svelte';
 	import Modal from './components/Modal.svelte';
 	import ContextMenu, { type ContextMenuItem } from './components/ContextMenu.svelte';
+	import Toc from './components/Toc.svelte';
+	import Toast from './components/Toast.svelte';
+	import { exportAsHtml as _exportHtml, exportAsPdf } from './utils/export';
+	import ZoomOverlay from './components/ZoomOverlay.svelte';
+import { processMarkdownHtml } from './utils/markdown';
 
 	const appWindow = getCurrentWindow();
 
 	import DOMPurify from 'dompurify';
 	import HomePage from './components/HomePage.svelte';
-	import { tabManager } from './stores/tabs.svelte.js';
-	import { settings } from './stores/settings.svelte.js';
+import { tabManager } from './stores/tabs.svelte.js';
+import { settings } from './stores/settings.svelte.js';
+import { t } from './utils/i18n.js';
 
 	// syntax highlighting & latex
 	let hljs: any = $state(null);
+	let katex: any = $state(null);
 	let renderMathInElement: any = $state(null);
 	let mermaid: any = $state(null);
 
@@ -33,14 +41,58 @@
 
 	let showSettings = $state(false);
 
+	let uiLanguage = $state(settings.language);
+
+	$effect(() => {
+		uiLanguage = settings.language;
+	});
+
 	let recentFiles = $state<string[]>([]);
 	let isFocused = $state(true);
-	let markdownBody = $state<HTMLElement | null>(null);
-	let editorPane = $state<{ syncScrollToLine: (line: number, ratio?: number) => void } | null>(null);
+	let containerEl: HTMLElement;
+	let markdownBody: HTMLElement | null = $state(null);
+	const renderDebounceMs = 50;
+	let renderTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	const highlightColorMap: Record<string, string> = {
+		default: 'color-mix(in srgb, var(--color-accent-fg) 40%, transparent)',
+		yellow: 'rgba(255, 208, 0, 0.4)',
+		orange: 'rgba(255, 140, 0, 0.4)',
+		red: 'rgba(255, 60, 60, 0.4)',
+		pink: 'rgba(255, 105, 180, 0.4)',
+		purple: 'rgba(164, 108, 244, 0.4)',
+		blue: 'rgba(67, 138, 243, 0.4)',
+		cyan: 'rgba(43, 185, 178, 0.4)',
+		green: 'rgba(77, 177, 88, 0.4)',
+	};
+	let editorPane = $state<{
+		syncScrollToLine: (line: number, ratio?: number) => void;
+		handleDroppedFile: (path: string, x: number, y: number) => Promise<void>;
+		updateDragCaret: (x: number, y: number) => void;
+		hideDragCaret: () => void;
+		undo: () => void;
+		redo: () => void;
+		revealHeader: (text: string) => void;
+	} | null>(null);
 	let liveMode = $state(localStorage.getItem('liveMode') !== 'false');
 
 	let isDragging = $state(false);
+	let dragTarget = $state<'editor' | 'preview' | null>(null);
+	let editorPaneEl = $state<HTMLElement>();
+	let viewerPaneEl = $state<HTMLElement>();
 	let isProgrammaticScroll = false;
+
+	let toasts = $state<{ id: string; message: string; type: 'info' | 'error' | 'warning' }[]>([]);
+	function addToast(message: string, type: 'info' | 'error' | 'warning' = 'info') {
+		const id = crypto.randomUUID();
+		toasts.push({ id, message, type });
+	}
+
+	// in-page scroll position history for mouse 4/5 nav
+	let scrollHistory: number[] = [];
+	let scrollFuture: number[] = [];
+	let collapsedHeaders = $state(new Set<string>());
+	let zoomData = $state<{ src?: string; html?: string } | null>(null);
 
 	// derived from tab manager
 	let activeTab = $derived(tabManager.activeTab);
@@ -50,26 +102,37 @@
 
 	// derived from tab manager
 	let currentFile = $derived(tabManager.activeTab?.path ?? '');
+	let isMarkdown = $derived(['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(currentFile.split('.').pop()?.toLowerCase() || ''));
 	let editorLanguage = $derived(getLanguage(currentFile));
 	let htmlContent = $derived(tabManager.activeTab?.content ?? '');
-	let sanitizedHtml = $derived(DOMPurify.sanitize(htmlContent));
+	let sanitizedHtml = $derived(DOMPurify.sanitize(htmlContent, {
+		ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|asset|tauri):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+	}));
 	let scrollTop = $derived(tabManager.activeTab?.scrollTop ?? 0);
 	let isScrolled = $derived(scrollTop > 0);
 	let windowTitle = $derived(tabManager.activeTab?.title ?? 'MarkpadX');
 	let isScrollSynced = $derived(tabManager.activeTab?.isScrollSynced ?? false);
 
+	let loadingTabs = $state<string[]>([]);
+	let isAtBottom = $state(false);
+
 	let showHome = $state(false);
 	let isFullWidth = $state(localStorage.getItem('isFullWidth') === 'true');
+	let viewerWidth = $state(0);
+	const TOC_WIDTH = 240;
+	let isOverhanging = $derived(isFullWidth || (viewerWidth > 0 && TOC_WIDTH > Math.max(50, (viewerWidth - 780) / 2)));
 
 	$effect(() => {
 		localStorage.setItem('isFullWidth', String(isFullWidth));
 	});
 
+	import { parseAndApplyVscodeTheme, clearVscodeTheme } from './utils/theme';
+
 	// Theme State
-	let theme = $state<'system' | 'dark' | 'light'>('system');
+	let theme = $state<string>('system');
 
 	onMount(() => {
-		const storedTheme = localStorage.getItem('theme') as 'system' | 'dark' | 'light' | null;
+		const storedTheme = localStorage.getItem('theme');
 		if (storedTheme) theme = storedTheme;
 		// Clear the forced background color from app.html
 		document.documentElement.style.removeProperty('background-color');
@@ -79,10 +142,29 @@
 		localStorage.setItem('theme', theme);
 		invoke('save_theme', { theme }).catch(console.error);
 
-		if (theme === 'system') {
-			delete document.documentElement.dataset.theme;
-		} else {
-			document.documentElement.dataset.theme = theme;
+		if (theme === 'system' || theme === 'light' || theme === 'dark') {
+			if (theme === 'system') {
+				delete document.documentElement.dataset.theme;
+				delete document.documentElement.dataset.themeType;
+			} else {
+				document.documentElement.dataset.theme = theme;
+				document.documentElement.dataset.themeType = theme;
+			}
+			clearVscodeTheme();
+			const monaco = (window as any).monaco;
+			if (monaco && monaco.editor) {
+				const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+				const effectiveTheme = theme === 'system' ? (isSystemDark ? 'dark' : 'light') : theme;
+				monaco.editor.setTheme(effectiveTheme === 'dark' ? 'vs-dark' : 'vs');
+			}
+		} else if (theme.startsWith('vscode:')) {
+			const name = theme.replace('vscode:', '');
+			invoke('read_vscode_theme', { name }).then((json: any) => {
+				parseAndApplyVscodeTheme(json, name);
+			}).catch(e => {
+				console.error("Failed to load vscode theme", e);
+				theme = 'system';
+			});
 		}
 
 		// Re-initialize mermaid or trigger update if needed
@@ -224,7 +306,7 @@
 	}
 
 	// ui state
-	let tooltip = $state({ show: false, text: '', x: 0, y: 0 });
+	let tooltip = $state({ show: false, text: '', shortcut: '', html: '', isFootnote: false, x: 0, y: 0, align: 'top' as 'top' | 'right' | 'left' | 'below' });
 	let caretEl: HTMLElement;
 	let caretAbsoluteTop = 0;
 	let modalState = $state<{
@@ -283,6 +365,36 @@
 		modalState.show = false;
 	}
 
+	function handleSplitterKeyDown(e: KeyboardEvent) {
+		const activeTab = tabManager.activeTab;
+		if (!activeTab || !tabManager.activeTabId) return;
+
+		if (e.key === 'ArrowLeft') {
+			tabManager.setSplitRatio(tabManager.activeTabId, Math.max(0.1, activeTab.splitRatio - 0.05));
+		} else if (e.key === 'ArrowRight') {
+			tabManager.setSplitRatio(tabManager.activeTabId, Math.min(0.9, activeTab.splitRatio + 0.05));
+		}
+	}
+
+	let isForceExiting = $state(false);
+
+	async function appExit() {
+		if (settings.restoreStateOnReopen) {
+			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
+			if (hasUnsaved) {
+				const response = await askCustom(t('modal.exit.unsaved.message'), {
+					title: t('modal.exit.unsaved.title'),
+					kind: 'warning',
+					showSave: false,
+				});
+				if (response !== 'discard') return;
+			}
+			localStorage.removeItem('savedTabsData');
+			isForceExiting = true;
+		}
+		appWindow.close();
+	}
+
 	function getLanguage(path: string) {
 		if (!path) return 'markdown';
 		const ext = path.split('.').pop()?.toLowerCase();
@@ -314,109 +426,158 @@
 		showHome = false;
 	});
 
-	function processMarkdownHtml(html: string, filePath: string): string {
-		const parser = new DOMParser();
-		const doc = parser.parseFromString(html, 'text/html');
 
-		// resolve relative image paths
-		for (const img of doc.querySelectorAll('img')) {
-			const src = img.getAttribute('src');
-			let finalSrc = src;
-			if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-				finalSrc = convertFileSrc(resolvePath(filePath, src));
-				img.setAttribute('src', finalSrc);
-			}
-
-			if (src) {
-				const ext = src.split('.').pop()?.toLowerCase();
-				const isVideo = ['mp4', 'webm', 'ogg', 'mov'].includes(ext || '');
-				const isAudio = ['mp3', 'wav', 'aac', 'flac', 'm4a'].includes(ext || '');
-
-				if (isVideo || isAudio) {
-					const media = doc.createElement(isVideo ? 'video' : 'audio');
-					media.setAttribute('controls', '');
-					media.setAttribute('src', finalSrc || '');
-					media.style.maxWidth = '100%';
-
-					// Copy attributes
-					if (img.hasAttribute('width')) media.setAttribute('width', img.getAttribute('width')!);
-					if (img.hasAttribute('height')) media.setAttribute('height', img.getAttribute('height')!);
-					if (img.hasAttribute('alt')) media.setAttribute('aria-label', img.getAttribute('alt')!);
-					if (img.hasAttribute('title')) media.setAttribute('title', img.getAttribute('title')!);
-
-					img.replaceWith(media);
-					continue;
+	function processInlineMath(root: Element) {
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+			acceptNode(node) {
+				let curr = node.parentElement;
+				while (curr && curr !== root) {
+					if (['CODE', 'PRE', 'SCRIPT', 'STYLE'].includes(curr.tagName)) return NodeFilter.FILTER_REJECT;
+					curr = curr.parentElement;
 				}
+				return NodeFilter.FILTER_ACCEPT;
+			},
+		});
 
-				if (isYoutubeLink(src)) {
-					const videoId = getYoutubeId(src);
-					if (videoId) replaceWithYoutubeEmbed(img, videoId);
-				}
+		const toReplace: { node: Text; newText: string }[] = [];
+		let node: Node | null;
+		const regex = /(^|[^\\])\$(?!\s)([^$]*?[^\s\\])\$(?![\d])/g;
+		while ((node = walker.nextNode())) {
+			const text = (node as Text).nodeValue || '';
+			if (text.includes('$')) {
+				const newText = text.replace(regex, "$1\\($2\\)");
+				if (newText !== text) toReplace.push({ node: node as Text, newText });
 			}
 		}
-
-		// convert youtube links to embeds
-		for (const a of doc.querySelectorAll('a')) {
-			const href = a.getAttribute('href');
-			if (href && isYoutubeLink(href)) {
-				const parent = a.parentElement;
-				if (parent && (parent.tagName === 'P' || parent.tagName === 'DIV') && parent.childNodes.length === 1) {
-					const videoId = getYoutubeId(href);
-					if (videoId) replaceWithYoutubeEmbed(a, videoId);
-				}
-			}
+		for (const { node, newText } of toReplace) {
+			node.nodeValue = newText;
 		}
-
-		// parse gfm alerts
-		for (const bq of doc.querySelectorAll('blockquote')) {
-			const firstP = bq.querySelector('p');
-			if (firstP) {
-				const text = firstP.textContent || '';
-				const match = text.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
-				if (match) {
-					const alertIcons: Record<string, string> = {
-						note: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>',
-						tip: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.21c-.044-.312-.18-.692-.41-1.025-.23-.333-.524-.681-.797-1.004l-.213-.252C2.962 7.325 2.5 6.395 2.5 5.25c0-2.978 2.304-5.25 5.5-5.25S13.5 2.272 13.5 5.25c0 1.145-.462 2.075-1.087 2.819l-.213.252c-.273.323-.567.671-.797 1.004-.23.333-.366.713-.41 1.025a.75.75 0 0 1-1.484-.21c.084-.594.337-1.079.621-1.49.203-.292.45-.584.673-.848l.214-.253c.56-.679.984-1.32.984-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6.25 14.5h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"></path></svg>',
-						important:
-							'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>',
-						warning:
-							'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.03 11.315a1.75 1.75 0 0 1-1.543 2.573H1.97a1.75 1.75 0 0 1-1.543-2.573ZM9 4.25a.75.75 0 0 0-1.5 0V9a.75.75 0 0 0 1.5 0ZM9 11a1 1 0 1 0-2 0 1 1 0 0 0 2 0Z"></path></svg>',
-						caution:
-							'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .39.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.39.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>',
-					};
-
-					const type = match[1].toLowerCase();
-					const alertDiv = doc.createElement('div');
-					alertDiv.className = `markdown-alert markdown-alert-${type}`;
-
-					const titleP = doc.createElement('p');
-					titleP.className = 'markdown-alert-title';
-					titleP.innerHTML = `${alertIcons[type] || ''} <span>${type.charAt(0).toUpperCase() + type.slice(1)}</span>`;
-
-					alertDiv.appendChild(titleP);
-
-					firstP.textContent = text.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i, '').trim() || '';
-					if (firstP.textContent === '' && firstP.nextSibling) firstP.remove();
-
-					while (bq.firstChild) alertDiv.appendChild(bq.firstChild);
-					bq.replaceWith(alertDiv);
-				}
-			}
-		}
-
-		return doc.body.innerHTML;
 	}
 
-	async function loadMarkdown(filePath: string, options: { navigate?: boolean; skipTabManagement?: boolean } = {}) {
+	function processHighlights(root: Element) {
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+			acceptNode(node) {
+				let curr = node.parentElement;
+				while (curr && curr !== root) {
+					if (['CODE', 'PRE', 'SCRIPT', 'STYLE'].includes(curr.tagName)) return NodeFilter.FILTER_REJECT;
+					curr = curr.parentElement;
+				}
+				return NodeFilter.FILTER_ACCEPT;
+			},
+		});
+
+		const toReplace: { node: Text; replaced: string }[] = [];
+		let node: Node | null;
+		while ((node = walker.nextNode())) {
+			const text = (node as Text).nodeValue || '';
+			if (text.includes('==')) {
+				const replaced = text.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
+				if (replaced !== text) toReplace.push({ node: node as Text, replaced });
+			}
+		}
+		for (const { node, replaced } of toReplace) {
+			const span = root.ownerDocument!.createElement('span');
+			span.innerHTML = replaced;
+			node.parentNode?.replaceChild(span, node);
+		}
+	}
+
+	function processBlockIds(root: Element, doc: Document) {
+		// handle pre-emitted block-id spans from rust parser
+		for (const el of Array.from(root.querySelectorAll('.block-id, [data-block-id]'))) {
+			const rawId = el.getAttribute('data-block-id') || (el as HTMLElement).textContent?.replace(/^\^/, '').trim() || '';
+			if (!rawId) continue;
+			const anchor = doc.createElement('a');
+			anchor.id = rawId;
+			anchor.className = 'block-id-anchor';
+			anchor.setAttribute('data-label', rawId);
+			anchor.setAttribute('aria-hidden', 'true');
+			el.replaceWith(anchor);
+		}
+
+		// scan text nodes for trailing ^id pattern (text ^blockid at end of block)
+		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+			acceptNode(node) {
+				const parent = node.parentElement;
+				if (!parent) return NodeFilter.FILTER_REJECT;
+				if (['CODE', 'PRE', 'SCRIPT', 'STYLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
+				return NodeFilter.FILTER_ACCEPT;
+			},
+		});
+
+		const blockIdPattern = / \^([a-zA-Z0-9_-]+)\s*$/;
+		const nodes: { node: Text; id: string }[] = [];
+		let textNode: Node | null;
+		while ((textNode = walker.nextNode())) {
+			const text = (textNode as Text).nodeValue || '';
+			const match = text.match(blockIdPattern);
+			if (match) nodes.push({ node: textNode as Text, id: match[1] });
+		}
+
+		for (const { node, id } of nodes) {
+			const text = node.nodeValue || '';
+			const cleanText = text.replace(blockIdPattern, '');
+			const anchor = doc.createElement('a');
+			anchor.id = id;
+			anchor.className = 'block-id-anchor';
+			anchor.setAttribute('data-label', id);
+			anchor.setAttribute('aria-hidden', 'true');
+			const parent = node.parentNode;
+			if (parent) {
+				const textBefore = doc.createTextNode(cleanText);
+				parent.replaceChild(anchor, node);
+				parent.insertBefore(textBefore, anchor);
+			}
+		}
+	}
+
+	function processTaskItems(root: Element) {
+		for (const input of Array.from(root.querySelectorAll('li input[type="checkbox"]'))) {
+			input.setAttribute('data-task-checkbox', '');
+			input.removeAttribute('disabled');
+			(input as HTMLInputElement).style.cursor = 'pointer';
+
+			const li = input.closest('li');
+			if (!li) continue;
+
+			// wrap bare text/inline nodes after checkbox in a span for CSS targeting
+			const nodes = Array.from(li.childNodes);
+			const inputIdx = nodes.indexOf(input);
+			const afterInput = nodes.slice(inputIdx + 1);
+
+			// we loop until we hit a block child (like a nested UL)
+			const inlineNodes = [];
+			for (const n of afterInput) {
+				if (n.nodeType === 1 && ['P', 'DIV', 'UL', 'OL'].includes((n as Element).tagName)) break;
+				inlineNodes.push(n);
+			}
+
+			if (inlineNodes.length > 0) {
+				const wrapper = root.ownerDocument!.createElement('span');
+				wrapper.className = 'task-text';
+				for (const n of inlineNodes) wrapper.appendChild(n);
+				
+				// insert the newly wrapped span after the checkbox
+				li.insertBefore(wrapper, afterInput[inlineNodes.length] || null);
+			}
+
+			if ((input as HTMLInputElement).checked) {
+				li.classList.add('task-done');
+			}
+		}
+	}
+
+	async function loadMarkdown(filePath: string, options: { navigate?: boolean; skipTabManagement?: boolean; preserveEditState?: boolean } = {}) {
 		showHome = false;
+		let existing = null;
 		try {
 			if (options.navigate && tabManager.activeTab) {
 				tabManager.navigate(tabManager.activeTab.id, filePath);
 			} else if (!options.skipTabManagement) {
-				const existing = tabManager.tabs.find((t) => t.path === filePath);
+				existing = tabManager.tabs.find((t) => t.path === filePath);
 				if (existing) {
 					tabManager.setActive(existing.id);
-				} else if (tabManager.activeTab && tabManager.activeTab.path === '') {
+				} else if (tabManager.activeTab && tabManager.activeTab.path === '' && !tabManager.activeTab.isDirty && tabManager.activeTab.rawContent.trim() === '') {
 					tabManager.updateTabPath(tabManager.activeTab.id, filePath);
 				} else {
 					tabManager.addTab(filePath);
@@ -426,14 +587,65 @@
 			if (!activeId) return;
 
 			const ext = filePath.split('.').pop()?.toLowerCase();
-			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd'].includes(ext || '');
+			const isMarkdown = ['md', 'markdown', 'mdown', 'mkd', 'txt'].includes(ext || '');
 			const tab = tabManager.tabs.find((t) => t.id === activeId);
 
 			if (isMarkdown) {
-				if (tab) tab.isEditing = false;
-				const html = (await invoke('open_markdown', { path: filePath })) as string;
-				const processedInfo = processMarkdownHtml(html, filePath);
+				// Only set default edit mode if it's a brand new tab or we aren't preserving state
+				if (tab && !options.preserveEditState && !existing) {
+					tab.isEditing = settings.startInEditor;
+				}
+				const [html, content, isFull] = await invoke('open_markdown_preview', { path: filePath, maxBytes: 50000 }) as [string, string, boolean];
+				const processedInfo = processMarkdownHtml(html, filePath, collapsedHeaders);
 				tabManager.updateTabContent(activeId, processedInfo);
+				tabManager.setTabRawContent(activeId, content);
+
+				if (!isFull) {
+					loadingTabs = [...loadingTabs, activeId];
+					tick().then(() => {
+						if (markdownBody) isAtBottom = markdownBody.scrollHeight <= markdownBody.clientHeight + 100;
+					});
+					Promise.all([
+						invoke('open_markdown', { path: filePath }) as Promise<string>,
+						invoke('read_file_content', { path: filePath }) as Promise<string>
+					]).then(([fullHtml, fullContent]) => {
+						const applyFull = () => {
+							try {
+								if (isScrolling) {
+									setTimeout(applyFull, 100);
+									return;
+								}
+								if (tabManager.tabs.find((t) => t.id === activeId)?.path === filePath) {
+									const fullProcessed = processMarkdownHtml(fullHtml, filePath, collapsedHeaders);
+									tabManager.updateTabContent(activeId, fullProcessed);
+									tabManager.setTabRawContent(activeId, fullContent);
+									loadingTabs = loadingTabs.filter((id) => id !== activeId);
+									if (tabManager.activeTabId === activeId) {
+										tick().then(() => {
+											setTimeout(renderRichContent, 10);
+										});
+									}
+								} else {
+									loadingTabs = loadingTabs.filter((id) => id !== activeId);
+								}
+							} catch (applyErr) {
+								console.error("applyFull error:", applyErr);
+								addToast('Error processing full markdown: ' + String(applyErr), 'error');
+								loadingTabs = loadingTabs.filter((id) => id !== activeId);
+							}
+						};
+						
+						if ('requestIdleCallback' in window) {
+							(window as any).requestIdleCallback(applyFull, { timeout: 2000 });
+						} else {
+							setTimeout(applyFull, 100);
+						}
+					}).catch((e) => {
+						console.error("Promise.all error:", e);
+						addToast('Backend Error loading full markdown: ' + String(e), 'error');
+						loadingTabs = loadingTabs.filter((id) => id !== activeId);
+					});
+				}
 			} else {
 				if (tab) tab.isEditing = true;
 				const content = (await invoke('read_file_content', { path: filePath })) as string;
@@ -463,7 +675,9 @@
 
 		// Initialize Mermaid with theme based on system preference or override
 		const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-		const effectiveTheme = theme === 'system' ? (isSystemDark ? 'dark' : 'neutral') : theme === 'dark' ? 'dark' : 'neutral';
+		const datasetThemeType = document.documentElement.dataset.themeType;
+		const isDark = datasetThemeType === 'dark' || (theme === 'dark') || (theme === 'system' && isSystemDark);
+		const effectiveTheme = isDark ? 'dark' : 'neutral';
 		mermaid.initialize({ startOnLoad: false, theme: effectiveTheme });
 
 		// Process code blocks
@@ -529,7 +743,7 @@
 
 				const copyCode = () => {
 					const codeToCopy = codeContent.replace(/\n$/, '');
-					navigator.clipboard.writeText(codeToCopy).then(() => {
+					invoke('clipboard_write_text', { text: codeToCopy }).then(() => {
 						const originalContent = label.innerHTML;
 						label.innerHTML = 'Copied!';
 						label.classList.add('copied');
@@ -558,15 +772,31 @@
 		}
 
 		// KaTeX math rendering
-		renderMathInElement(markdownBody, {
-			delimiters: [
-				{ left: '$$', right: '$$', display: true },
-				{ left: '$', right: '$', display: false },
-				{ left: '\\(', right: '\\)', display: false },
-				{ left: '\\[', right: '\\]', display: true },
-			],
-			throwOnError: false,
-		});
+		if (katex) {
+			const mathElements = markdownBody.querySelectorAll('span[data-math]');
+			for (const el of Array.from(mathElements)) {
+				const isDisplay = el.getAttribute('data-math') === 'display';
+				try {
+					katex.render(el.textContent || '', el as HTMLElement, {
+						displayMode: isDisplay,
+						throwOnError: false,
+					});
+				} catch (e) {
+					console.error('KaTeX rendering error:', e);
+				}
+			}
+		}
+
+		if (renderMathInElement) {
+			renderMathInElement(markdownBody, {
+				delimiters: [
+					{ left: '$$', right: '$$', display: true },
+					{ left: '\\(', right: '\\)', display: false },
+					{ left: '\\[', right: '\\]', display: true },
+				],
+				throwOnError: false,
+			});
+		}
 	}
 
 	// One-way sync htmlContent into the article element (no bind:innerHTML to avoid
@@ -717,8 +947,19 @@
 		}
 	}
 
+	let isScrolling = $state(false);
+	let scrollIdleTimer: ReturnType<typeof setTimeout>;
+
 	function handleScroll(e: Event) {
 		const target = e.target as HTMLElement;
+
+		isAtBottom = Math.abs(target.scrollHeight - target.scrollTop - target.clientHeight) < 100;
+
+		isScrolling = true;
+		clearTimeout(scrollIdleTimer);
+		scrollIdleTimer = setTimeout(() => {
+			isScrolling = false;
+		}, 300);
 
 		if (isProgrammaticScroll) {
 			isProgrammaticScroll = false;
@@ -770,6 +1011,186 @@
 
 		syncEditorToPreviewScroll(target);
 	}
+
+	function toggleFold(key: string) {
+		const isCurrentlyCollapsed = collapsedHeaders.has(key);
+
+		if (isCurrentlyCollapsed) {
+			const next = new Set(collapsedHeaders);
+			next.delete(key);
+			collapsedHeaders = next;
+		} else {
+			collapsedHeaders = new Set([...collapsedHeaders, key]);
+		}
+
+		if (!markdownBody) return;
+
+		let h = markdownBody.querySelector(`[id="${CSS.escape(key)}"].foldable-header`) as HTMLElement | null;
+		if (!h) {
+			const allHeaders = markdownBody.querySelectorAll('.foldable-header');
+			for (const el of Array.from(allHeaders)) {
+				if ((el.textContent?.trim() || '') === key) {
+					h = el as HTMLElement;
+					break;
+				}
+			}
+		}
+		if (!h) return;
+
+		const wrapId = h.getAttribute('data-fold-target');
+		const wrapper = wrapId ? document.getElementById(wrapId) : null;
+		if (!wrapper) return;
+
+		h.classList.toggle('is-collapsed', !isCurrentlyCollapsed);
+		wrapper.classList.toggle('is-collapsed', !isCurrentlyCollapsed);
+	}
+
+	function handleLinkClick(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+
+		// header fold toggle
+		const foldIcon = target.closest('.header-fold-icon');
+		const foldableHeader = foldIcon ? foldIcon.closest('.foldable-header') as HTMLElement : null;
+		if (foldableHeader) {
+			if (e.detail > 1) e.preventDefault(); // prevent double-click selection
+			e.stopPropagation();
+			const key = foldableHeader.id || foldableHeader.textContent?.trim() || '';
+			const wrapId = foldableHeader.getAttribute('data-fold-target');
+			const wrapper = wrapId ? document.getElementById(wrapId) : null;
+			if (wrapper) {
+				const isCollapsed = foldableHeader.classList.toggle('is-collapsed');
+				wrapper.classList.toggle('is-collapsed', isCollapsed);
+				if (isCollapsed) {
+					collapsedHeaders = new Set([...collapsedHeaders, key]);
+				} else {
+					const next = new Set(collapsedHeaders);
+					next.delete(key);
+					collapsedHeaders = next;
+				}
+			}
+			return;
+		}
+
+		// callout fold toggle
+		const calloutToggle = target.closest('.callout-toggle');
+		if (calloutToggle) {
+			if (e.detail > 1) e.preventDefault(); // prevent double-click selection
+			e.stopPropagation();
+			const alert = calloutToggle.closest('.callout-foldable');
+			const content = alert?.querySelector('.markdown-alert-content');
+			if (alert && content) {
+				alert.classList.toggle('is-collapsed');
+				content.classList.toggle('is-collapsed');
+			}
+			return;
+		}
+
+		// task checkbox toggle in read mode
+		if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox' && target.hasAttribute('data-task-checkbox')) {
+			e.preventDefault();
+			e.stopPropagation();
+			toggleTaskCheckbox(target as HTMLInputElement);
+			return;
+		}
+
+		const a = target.closest('a');
+		if (a) {
+			const href = a.getAttribute('href');
+			if (href?.startsWith('#') && href.length > 1) {
+				e.preventDefault();
+				let id = href.substring(1);
+				if (id.startsWith('^')) {
+					id = id.substring(1);
+				}
+				const el =
+					(markdownBody?.querySelector(`[id="${CSS.escape(id)}"]`) as HTMLElement | null) ||
+					(markdownBody?.querySelector(`[name="${CSS.escape(id)}"]`) as HTMLElement | null);
+				if (el && markdownBody) {
+					pushScrollHistory();
+					const containerRect = markdownBody.getBoundingClientRect();
+					const elRect = el.getBoundingClientRect();
+					const targetScrollTop = elRect.top - containerRect.top + markdownBody.scrollTop - 60;
+					markdownBody.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+				}
+			}
+		}
+
+        // media zoom handling
+        const img = target.closest('img');
+        if (img) {
+            zoomData = { src: img.src };
+            return;
+        }
+
+        const mermaidDiv = target.closest('.mermaid-diagram');
+        if (mermaidDiv) {
+            const svg = mermaidDiv.querySelector('svg');
+            if (svg) {
+                // clone and strip fixed dimensions so viewBox governs scaling
+                const clone = svg.cloneNode(true) as SVGElement;
+                clone.removeAttribute('width');
+                clone.removeAttribute('height');
+                clone.style.width = '';
+                clone.style.height = '';
+                zoomData = { html: clone.outerHTML };
+                return;
+            }
+        }
+    }
+
+	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
+		const tab = tabManager.activeTab;
+		if (!tab || !tab.path) return;
+
+		// always read latest from disk to avoid stale state
+		let raw: string;
+		try {
+			raw = (await invoke('read_file_content', { path: tab.path })) as string;
+		} catch (e) {
+			console.error('failed to read file for task toggle', e);
+			return;
+		}
+
+		// find which task item this is by counting checkboxes in DOM
+		const allBoxes = Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []);
+		const index = allBoxes.indexOf(checkbox);
+		if (index === -1) return;
+
+		// checkbox.checked is still the OLD state (e.preventDefault blocked the toggle)
+		const nowChecked = !checkbox.checked;
+
+		// replace the nth [ ] or [x] in the raw markdown
+		let count = 0;
+		const updated = raw.replace(/^(\s*[-*+] )\[( |x|X)\]/gm, (match, prefix) => {
+			if (count === index) {
+				count++;
+				return `${prefix}[${nowChecked ? 'x' : ' '}]`;
+			}
+			count++;
+			return match;
+		});
+
+		if (updated === raw) return;
+
+		// save file
+		try {
+			await invoke('save_file_content', { path: tab.path, content: updated });
+			tab.rawContent = updated;
+			tab.originalContent = updated;
+		} catch (e) {
+			console.error('failed to save task toggle', e);
+			return;
+		}
+
+		// update DOM optimistically
+		checkbox.checked = nowChecked;
+		const li = checkbox.closest('li');
+		if (li) {
+			li.classList.toggle('task-done', nowChecked);
+		}
+	}
+
+
 
 	function saveRecentFile(path: string) {
 		let files = [...recentFiles].filter((f) => f !== path);
@@ -840,8 +1261,8 @@
 
 		if (!tab.isDirty) return true;
 
-		const response = await askCustom(`You have unsaved changes in "${tab.title}". Do you want to save them before closing?`, {
-			title: 'Unsaved Changes',
+		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
+			title: t('modal.unsavedChanges.title'),
 			kind: 'warning',
 			showSave: true,
 		});
@@ -863,14 +1284,14 @@
 			// Switch back to view
 			if (tab.isDirty && tab.path !== '') {
 				if (autoSave) {
-					const success = await saveContent();
-					if (!success) return; // If save fails, stay in edit mode?
-				} else {
-					const response = await askCustom('You have unsaved changes. Do you want to save them before returning to view mode?', {
-						title: 'Unsaved Changes',
-						kind: 'warning',
-						showSave: true,
-					});
+				const success = await saveContent();
+				if (!success) return; // If save fails, stay in edit mode?
+			} else {
+				const response = await askCustom(t('modal.unsavedChanges.viewMode.message'), {
+					title: t('modal.unsavedChanges.title'),
+					kind: 'warning',
+					showSave: true,
+				});
 
 					if (response === 'cancel') return;
 					if (response === 'save') {
@@ -884,11 +1305,11 @@
 			tab.isEditing = false;
 			if (tab.path !== '') {
 				tab.isDirty = false;
-				await loadMarkdown(tab.path);
+				await loadMarkdown(tab.path, { preserveEditState: true });
 			} else {
 				try {
 					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
-					const processedInfo = processMarkdownHtml(html, '');
+					const processedInfo = processMarkdownHtml(html, '', collapsedHeaders);
 					tabManager.updateTabContent(tab.id, processedInfo);
 				} catch (e) {
 					console.error('Failed to render markdown for unsaved file', e);
@@ -976,6 +1397,16 @@
 		return false;
 	}
 
+	async function exportAsHtml() {
+		const tab = tabManager.activeTab;
+		await _exportHtml({
+			htmlContent: htmlContent,
+			markdownBody,
+			tabTitle: tab?.title || '',
+			tabPath: tab?.path || '',
+		});
+	}
+
 	function handleNewFile() {
 		tabManager.addNewTab();
 		showHome = false;
@@ -997,12 +1428,30 @@
 	}
 
 	async function closeFile() {
-		if (tabManager.activeTabId) {
-			if (await canCloseTab(tabManager.activeTabId)) {
-				tabManager.closeTab(tabManager.activeTabId);
-			}
+		if (!tabManager.activeTabId) {
+			await destroyWindowAfterTabsClosed();
+			return;
 		}
-		if (liveMode && tabManager.tabs.length === 0) invoke('unwatch_file').catch(console.error);
+
+		await closeTabAndWindowIfLast(tabManager.activeTabId);
+	}
+
+	async function closeTabAndWindowIfLast(tabId: string) {
+		if (!(await canCloseTab(tabId))) return;
+
+		tabManager.closeTab(tabId);
+		if (tabManager.tabs.length > 0) return;
+
+		if (liveMode) invoke('unwatch_file').catch(console.error);
+		await destroyWindowAfterTabsClosed();
+	}
+
+	async function destroyWindowAfterTabsClosed() {
+		if (settings.restoreStateOnReopen) {
+			localStorage.setItem('savedTabsData', tabManager.serializeState());
+		}
+
+		await appWindow.destroy();
 	}
 
 	async function openFileLocation() {
@@ -1020,25 +1469,142 @@
 		}
 	}
 
+	async function saveImageAs(src: string) {
+		let realPath = '';
+		if (src.startsWith('asset:')) {
+			try {
+				const url = new URL(src);
+				realPath = decodeURIComponent(url.pathname);
+				if (realPath.startsWith('/localhost/')) {
+					realPath = realPath.substring(11);
+				} else if (realPath.startsWith('/')) {
+					realPath = realPath.substring(1);
+				}
+			} catch (e) {
+				console.error('Failed to parse asset URL:', e);
+			}
+		} else if (src.startsWith('http')) {
+			try {
+				const response = await fetch(src);
+				const buffer = await response.arrayBuffer();
+				const dest = await save({ 
+					defaultPath: 'image.png',
+					filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+				});
+				if (dest) {
+					await invoke('save_file_binary', { path: dest, data: Array.from(new Uint8Array(buffer)) });
+					addToast('Image saved successfully');
+				}
+			} catch (e) {
+				addToast('Failed to save remote image', 'error');
+			}
+			return;
+		}
+
+		if (realPath) {
+			const ext = realPath.split('.').pop() || 'png';
+			const dest = await save({ 
+				defaultPath: `image.${ext}`,
+				filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }]
+			});
+			if (dest) {
+				try {
+					await invoke('copy_file', { src: realPath, dest });
+					addToast('Image saved successfully');
+				} catch (e) {
+					addToast(`Failed to save image: ${e}`, 'error');
+				}
+			}
+		}
+	}
+
+	async function saveDiagramAs(container: HTMLElement) {
+		const svg = container.querySelector('svg')?.outerHTML;
+		if (!svg) return;
+		const dest = await save({ 
+			defaultPath: 'diagram.svg',
+			filters: [{ name: 'SVG Image', extensions: ['svg'] }]
+		});
+		if (dest) {
+			try {
+				await invoke('save_file_content', { path: dest, content: svg });
+				addToast('Diagram saved as SVG');
+			} catch (e) {
+				addToast(`Failed to save diagram: ${e}`, 'error');
+			}
+		}
+	}
+
 	function handleContextMenu(e: MouseEvent) {
 		if (mode !== 'app') return;
 		e.preventDefault();
 
 		const selection = window.getSelection();
 		const hasSelection = selection ? selection.toString().length > 0 : false;
+		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
+
+		// detect heading for copy ref
+		const heading = (e.target as HTMLElement).closest('h1, h2, h3, h4, h5, h6');
+		let copyRefItem: any[] = [];
+		if (heading) {
+			const text = heading.textContent?.trim() || '';
+			const tab = tabManager.activeTab;
+			const filename = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
+			const ref = filename ? `[[${filename}#${text}]]` : `#${text}`;
+			copyRefItem = [
+				{ label: t('menu.copyReference', uiLanguage), onClick: () => invoke('clipboard_write_text', { text: ref }) },
+				{ separator: true },
+			];
+		}
+
+		const img = (e.target as HTMLElement).closest('img');
+		let mediaItems: any[] = [];
+		if (img) {
+			mediaItems = [
+				{ label: t('menu.saveImageAs', uiLanguage), onClick: () => saveImageAs(img.src) },
+				{ separator: true }
+			];
+		}
+
+		const mermaidDiag = (e.target as HTMLElement).closest('.mermaid-diagram');
+		if (mermaidDiag) {
+			mediaItems = [
+				{ label: t('menu.saveDiagramAsSvg', uiLanguage), onClick: () => saveDiagramAs(mermaidDiag as HTMLElement) },
+				{ separator: true }
+			];
+		}
 
 		docContextMenu = {
 			show: true,
 			x: e.clientX,
 			y: e.clientY,
 			items: [
-				...(hasSelection ? [{ label: 'Copy', onClick: () => document.execCommand('copy') }] : []),
-				{ label: 'Select All', onClick: () => document.execCommand('selectAll') },
+				...copyRefItem,
+				...mediaItems,
+				...(isEditing && isInsideEditor
+					? [
+							{ label: t('menu.undo', uiLanguage), shortcut: 'Ctrl+Z', onClick: () => editorPane?.undo() },
+							{ label: t('menu.redo', uiLanguage), shortcut: 'Ctrl+Y', onClick: () => editorPane?.redo() },
+							{ separator: true }
+						]
+					: []),
+				...(hasSelection ? [{ label: t('menu.copy', uiLanguage), onClick: () => {
+					const selection = window.getSelection()?.toString();
+					if (selection) invoke('clipboard_write_text', { text: selection });
+				} }] : []),
+				{ label: t('menu.selectAll', uiLanguage), onClick: () => {
+					if (!markdownBody) return;
+					const range = document.createRange();
+					range.selectNodeContents(markdownBody);
+					const selection = window.getSelection();
+					selection?.removeAllRanges();
+					selection?.addRange(range);
+				} },
 				{ separator: true },
-				{ label: 'Open File Location', onClick: openFileLocation, disabled: !currentFile },
-				{ label: 'Edit', onClick: () => toggleEdit() },
+				{ label: t('menu.openLocation', uiLanguage), onClick: openFileLocation, disabled: !currentFile },
+				{ label: t('menu.edit', uiLanguage), onClick: () => toggleEdit() },
 				{ separator: true },
-				{ label: 'Close File', onClick: closeFile },
+				{ label: t('menu.closeFile', uiLanguage), onClick: closeFile },
 			],
 		};
 	}
@@ -1049,27 +1615,66 @@
 		while (target && target.tagName !== 'A' && target !== document.body) target = target.parentElement as HTMLElement;
 		if (target?.tagName === 'A') {
 			const anchor = target as HTMLAnchorElement;
-			const rawHref = anchor.getAttribute('href');
+			const rawHref = anchor.getAttribute('href') || '';
 			if (!rawHref) return;
 
-			let tooltipText = anchor.href;
+			// tooltip for same-page anchor links: show text of target header
 			if (rawHref.startsWith('#')) {
-				tooltipText = rawHref;
-			} else if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
+				let id = rawHref.substring(1);
+				if (id.startsWith('^')) id = id.substring(1);
+				const el = markdownBody?.querySelector(`[id="${CSS.escape(id)}"]`) as HTMLElement | null;
+				if (el) {
+					// Use data-label if it's a block anchor, otherwise use textContent
+					let text = el.getAttribute('data-label') || el.textContent || '';
+					text = text.replace(/↩.*$/, '').trim(); // remove backrefs if any
+					if (text) {
+						const rect = anchor.getBoundingClientRect();
+						tooltip = { show: true, text, shortcut: '', html: '', isFootnote: false, x: rect.left + rect.width / 2, y: rect.top - 8, align: 'top' };
+						return;
+					}
+				}
+				const rect = anchor.getBoundingClientRect();
+				tooltip = { show: true, text: rawHref, shortcut: '', html: '', isFootnote: false, x: rect.left + rect.width / 2, y: rect.top - 8, align: 'top' };
+				return;
+			}
+
+			// footnote references: show footnote content instead of URL
+			if (anchor.hasAttribute('data-footnote-ref') || anchor.closest('[data-footnote-ref]') || rawHref.match(/#fn-|#fnref-|#user-content-fn/)) {
+				const fnId = rawHref.replace(/^#/, '');
+				const fnLi = markdownBody?.querySelector(`#${CSS.escape(fnId)}`) ||
+				              markdownBody?.querySelector(`li#${CSS.escape(fnId)}`);
+				if (fnLi) {
+					// clone to remove backref arrow from tooltip
+					const clone = fnLi.cloneNode(true) as HTMLElement;
+					const backrefs = clone.querySelectorAll('.footnote-backref, a[href^="#fnref-"]');
+					backrefs.forEach(b => b.remove());
+
+					let fnHtml = clone.innerHTML.trim();
+					if (fnHtml) {
+						const rect = anchor.getBoundingClientRect();
+						tooltip = { show: true, text: '', shortcut: '', html: fnHtml, isFootnote: true, x: rect.left + rect.width / 2, y: rect.top - 8, align: 'top' };
+						return;
+					}
+				}
+			}
+
+			// resolve folder and markdown file links to absolute paths for the tooltip
+			let tooltipText = anchor.href;
+			if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
 				tooltipText = resolvePath(currentFile, decodeURIComponent(rawHref.slice(0, -1)));
 			} else {
-				const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
+				const isMarkdownLink = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
 					const urlNoHash = rawHref.split('#')[0].split('?')[0];
 					return urlNoHash.toLowerCase().endsWith(ext);
 				});
-				if (isMarkdown && !rawHref.match(/^[a-z]+:\/\//i)) {
+				if (isMarkdownLink && !rawHref.match(/^[a-z]+:\/\//i)) {
 					const urlNoHash = rawHref.split('#')[0].split('?')[0];
 					tooltipText = resolvePath(currentFile, decodeURIComponent(urlNoHash));
 				}
 			}
 
 			const rect = anchor.getBoundingClientRect();
-			tooltip = { show: true, text: tooltipText, x: rect.left + rect.width / 2, y: rect.top - 8 };
+			tooltip = { show: true, text: tooltipText, shortcut: '', html: '', isFootnote: false, x: rect.left + rect.width / 2, y: rect.top - 8, align: 'top' };
 		}
 	}
 
@@ -1112,7 +1717,7 @@
 				return;
 			}
 
-			const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
+			const isMarkdown = ['.md', '.markdown', '.mdown', '.mkd', '.txt'].some((ext) => {
 				const urlNoHash = rawHref.split('#')[0].split('?')[0];
 				return urlNoHash.toLowerCase().endsWith(ext);
 			});
@@ -1153,13 +1758,16 @@
 
 	$effect(() => {
 		const tab = tabManager.activeTab;
-		if (tab && tab.isSplit && tab.rawContent !== undefined) {
+		if (tab && (tab.isSplit || (isEditing && settings.showToc)) && tab.rawContent !== undefined) {
+			if ((tab as any)._lastRenderedRawContent === tab.rawContent) return;
+
 			clearTimeout(debounceTimer);
 			debounceTimer = setTimeout(() => {
 				invoke('render_markdown', { content: tab.rawContent })
 					.then((html) => {
-						const processed = processMarkdownHtml(html as string, tab.path);
+						const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
 						tabManager.updateTabContent(tab.id, processed);
+						(tab as any)._lastRenderedRawContent = tab.rawContent;
 						tick().then(renderRichContent);
 					})
 					.catch(console.error);
@@ -1189,8 +1797,8 @@
 					const success = await saveContent();
 					if (!success) return;
 				} else {
-					const response = await askCustom('You have unsaved changes. Do you want to save them before closing split view?', {
-						title: 'Unsaved Changes',
+					const response = await askCustom(t('modal.unsavedChanges.splitView.message'), {
+						title: t('modal.unsavedChanges.title'),
 						kind: 'warning',
 						showSave: true,
 					});
@@ -1277,6 +1885,22 @@
 			e.preventDefault();
 			tabManager.cycleTab(e.shiftKey ? 'prev' : 'next');
 		}
+		if (cmdOrCtrl && code === 'PageUp') {
+			e.preventDefault();
+			tabManager.cycleTab('prev');
+		}
+		if (cmdOrCtrl && code === 'PageDown') {
+			e.preventDefault();
+			tabManager.cycleTab('next');
+		}
+		if (e.metaKey && e.altKey && code === 'ArrowLeft') {
+			e.preventDefault();
+			tabManager.cycleTab('prev');
+		}
+		if (e.metaKey && e.altKey && code === 'ArrowRight') {
+			e.preventDefault();
+			tabManager.cycleTab('next');
+		}
 		if (cmdOrCtrl && (key === '=' || key === '+')) {
 			e.preventDefault();
 			zoomLevel = Math.min(zoomLevel + 10, 500);
@@ -1303,20 +1927,43 @@
 				if (path) loadMarkdown(path, { skipTabManagement: true });
 			}
 		}
+		if (cmdOrCtrl && key === ',') {
+			e.preventDefault();
+			showSettings = !showSettings;
+		}
+	}
+
+	function pushScrollHistory() {
+		if (markdownBody) {
+			scrollHistory.push(markdownBody.scrollTop);
+			scrollFuture = [];
+			if (scrollHistory.length > 50) scrollHistory.shift();
+		}
 	}
 
 	function handleMouseUp(e: MouseEvent) {
 		if (e.button === 3) {
 			// Back
 			e.preventDefault();
-			if (tabManager.activeTabId) {
+			// try in-page scroll history first
+			if (scrollHistory.length > 0 && markdownBody) {
+				scrollFuture.push(markdownBody.scrollTop);
+				const pos = scrollHistory.pop()!;
+				isProgrammaticScroll = true;
+				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
+			} else if (tabManager.activeTabId) {
 				const path = tabManager.goBack(tabManager.activeTabId);
 				if (path) loadMarkdown(path, { skipTabManagement: true });
 			}
 		} else if (e.button === 4) {
 			// Forward
 			e.preventDefault();
-			if (tabManager.activeTabId) {
+			if (scrollFuture.length > 0 && markdownBody) {
+				scrollHistory.push(markdownBody.scrollTop);
+				const pos = scrollFuture.pop()!;
+				isProgrammaticScroll = true;
+				markdownBody.scrollTo({ top: pos, behavior: 'smooth' });
+			} else if (tabManager.activeTabId) {
 				const path = tabManager.goForward(tabManager.activeTabId);
 				if (path) loadMarkdown(path, { skipTabManagement: true });
 			}
@@ -1401,9 +2048,24 @@
 		loadRecentFiles();
 
 		// @ts-ignore
-		Promise.all([import('highlight.js'), import('katex/dist/contrib/auto-render'), import('mermaid')]).then(([hljsModule, katexModule, mermaidModule]) => {
+		Promise.all([import('highlight.js'), import('highlightjs-svelte'), import('katex'), import('mermaid')]).then(async ([hljsModule, svelteModule, katexMainModule, mermaidModule]) => {
 			hljs = hljsModule.default;
-			renderMathInElement = katexModule.default;
+			try {
+				svelteModule.default(hljs);
+			} catch(e) { console.error('svelte hljs error', e); }
+			
+			katex = katexMainModule.default;
+			// some extensions bind to window.katex
+			(window as any).katex = katex;
+			
+			// @ts-ignore
+			const [autoRenderModule] = await Promise.all([
+				import('katex/dist/contrib/auto-render.js'),
+				import('katex/dist/contrib/mhchem.js'),
+				import('katex/dist/contrib/copy-tex.js')
+			]);
+			
+			renderMathInElement = autoRenderModule.default;
 			mermaid = mermaidModule.default;
 		});
 
@@ -1415,6 +2077,26 @@
 			const { getCurrentWindow } = await import('@tauri-apps/api/window');
 			const appWindow = getCurrentWindow();
 			const appMode = (await invoke('get_app_mode')) as any;
+
+			if (settings.restoreStateOnReopen) {
+				const savedData = localStorage.getItem('savedTabsData');
+				if (savedData) {
+					tabManager.restoreState(savedData);
+					for (const tab of tabManager.tabs) {
+						if (!tab.content && tab.rawContent) {
+							invoke('render_markdown', { content: tab.rawContent })
+								.then((html) => {
+									const processed = processMarkdownHtml(html as string, tab.path, collapsedHeaders);
+									tabManager.updateTabContent(tab.id, processed);
+									if (tabManager.activeTabId === tab.id) {
+										tick().then(renderRichContent);
+									}
+								})
+								.catch(console.error);
+						}
+					}
+				}
+			}
 
 			const urlParams = new URLSearchParams(window.location.search);
 			const fileParam = urlParams.get('file');
@@ -1462,7 +2144,7 @@
 					const tab = tabManager.tabs.find((t) => t.id === tabId);
 					if (!tab || !tab.path) return;
 
-					const newName = window.prompt('Rename file:', tab.title);
+					const newName = window.prompt(t('menu.renameFile', settings.language), tab.title);
 					if (newName && newName !== tab.title) {
 						const oldPath = tab.path;
 						const newPath = oldPath.replace(/[/\\][^/\\]+$/, (m) => m.charAt(0) + newName);
@@ -1493,9 +2175,7 @@
 			unlisteners.push(
 				await listen('menu-tab-close', async (event) => {
 					const tabId = event.payload as string;
-					if (await canCloseTab(tabId)) {
-						tabManager.closeTab(tabId);
-					}
+					await closeTabAndWindowIfLast(tabId);
 				}),
 			);
 			unlisteners.push(
@@ -1518,16 +2198,28 @@
 			unlisteners.push(
 				await appWindow.onCloseRequested(async (event) => {
 					console.log('onCloseRequested triggered');
+					if (isForceExiting) return;
+
+					if (settings.restoreStateOnReopen) {
+						try {
+							const stateStr = tabManager.serializeState();
+							localStorage.setItem('savedTabsData', stateStr);
+						} catch (e) {
+							console.error('Failed to save state on close:', e);
+						}
+						return;
+					}
+
 					const dirtyTabs = tabManager.tabs.filter((t) => t.isDirty);
 					console.log('Dirty tabs:', dirtyTabs.length);
 					if (dirtyTabs.length > 0) {
 						console.log('Preventing default close');
-						event.preventDefault();
-						const response = await askCustom(`You have ${dirtyTabs.length} unsaved file(s). Do you want to save your changes?`, {
-							title: 'Unsaved Changes',
-							kind: 'warning',
-							showSave: true,
-						});
+				event.preventDefault();
+				const response = await askCustom(t('modal.youHaveUnsavedFiles', settings.language).replace('{{count}}', dirtyTabs.length.toString()), {
+											title: t('modal.unsavedChanges', settings.language),
+					kind: 'warning',
+					showSave: true,
+				});
 
 						if (response === 'save') {
 							// Attempt to save all dirty tabs
@@ -1556,18 +2248,59 @@
 
 			unlisteners.push(
 				await appWindow.onDragDropEvent((event) => {
-					if (isEditing) {
-						isDragging = false;
-						return;
-					}
-
 					if (event.payload.type === 'enter' || event.payload.type === 'over') {
+						const { x, y } = event.payload.position;
 						isDragging = true;
+						
+						if (editorPaneEl) {
+							const rect = editorPaneEl.getBoundingClientRect();
+							if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+								dragTarget = 'editor';
+								if (editorPane) editorPane.updateDragCaret(x, y);
+							} else if (viewerPaneEl) {
+								const vRect = viewerPaneEl.getBoundingClientRect();
+								if (x >= vRect.left && x <= vRect.right && y >= vRect.top && y <= vRect.bottom) {
+									dragTarget = 'preview';
+									if (editorPane) editorPane.hideDragCaret();
+								} else {
+									dragTarget = null;
+									if (editorPane) editorPane.hideDragCaret();
+								}
+							} else {
+								dragTarget = null;
+								if (editorPane) editorPane.hideDragCaret();
+							}
+						}
 					} else if (event.payload.type === 'drop') {
+						const { x, y } = event.payload.position;
+						const paths = event.payload.paths;
+						const currentEditor = editorPane;
+						if (currentEditor) currentEditor.hideDragCaret();
+						if (dragTarget === 'editor' && currentEditor) {
+							paths.forEach(path => {
+								const ext = path.split('.').pop()?.toLowerCase();
+								if (ext && ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+									currentEditor.handleDroppedFile(path, x, y);
+								}
+							});
+						} else if (dragTarget === 'preview' || (!isSplit && !isEditing)) {
+							paths.forEach(path => {
+								const ext = path.split('.').pop()?.toLowerCase();
+								if (ext && ['md', 'markdown', 'txt'].includes(ext)) {
+									loadMarkdown(path);
+								} else {
+									const filename = path.split(/[\/\\]/).pop() || 'File';
+									addToast(t('toast.unsupportedFile').replace('{{filename}}', filename), 'error');
+								}
+							});
+						}
+						
 						isDragging = false;
-						event.payload.paths.forEach((path) => loadMarkdown(path));
-					} else {
+						dragTarget = null;
+					} else if (event.payload.type === 'leave') {
 						isDragging = false;
+						dragTarget = null;
+						if (editorPane) editorPane.hideDragCaret();
 					}
 				}),
 			);
@@ -1614,9 +2347,9 @@
 		onopenFile={selectFile}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
-		onexit={() => {
-			appWindow.close();
-		}}
+		onexportHtml={exportAsHtml}
+		onexportPdf={exportAsPdf}
+		onexit={appExit}
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
@@ -1631,11 +2364,7 @@
 		{theme}
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
-		oncloseTab={(id) => {
-			canCloseTab(id).then((can) => {
-				if (can) tabManager.closeTab(id);
-			});
-		}} />
+		oncloseTab={closeTabAndWindowIfLast} />
 	<div class="loading-screen">
 		<svg class="spinner" viewBox="0 0 50 50">
 			<circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="4"></circle>
@@ -1659,9 +2388,9 @@
 		onopenFile={selectFile}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
-		onexit={() => {
-			appWindow.close();
-		}}
+		onexportHtml={exportAsHtml}
+		onexportPdf={exportAsPdf}
+		onexit={appExit}
 		ontoggleHome={toggleHome}
 		ononpenFileLocation={openFileLocation}
 		ontoggleLiveMode={toggleLiveMode}
@@ -1678,24 +2407,24 @@
 		{theme}
 		onSetTheme={(t) => (theme = t)}
 		onopenSettings={() => (showSettings = true)}
-		oncloseTab={(id) => {
-			canCloseTab(id).then((can) => {
-				if (can) tabManager.closeTab(id);
-			});
-		}} />
+		oncloseTab={closeTabAndWindowIfLast} />
 
 	<Settings show={showSettings} {theme} onSetTheme={(t) => (theme = t)} onclose={() => (showSettings = false)} />
 
 	{#if tabManager.activeTab && (tabManager.activeTab.path !== '' || tabManager.activeTab.title !== 'Recents') && !showHome}
-		{#key tabManager.activeTabId}
 			<div
 				class="markdown-container"
-				style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}; --code-font: {settings.codeFont}, monospace; --code-font-size: {settings.codeFontSize}px"
+				style="zoom: {isEditing && !isSplit ? 1 : zoomLevel / 100}; --code-font: {settings.codeFont}, monospace; --code-font-size: {settings.codeFontSize}px; --highlight-color: {highlightColorMap[settings.highlightColor] || highlightColorMap.yellow};"
 				onwheel={handleWheel}
 				role="presentation">
-				<div class="layout-container" class:split={isSplit} class:editing={isEditing}>
+				<div class="layout-container" 
+					class:split={isSplit} 
+					class:editing={isEditing} 
+					class:has-pinned-toc={isMarkdown && settings.pinnedToc && settings.showToc}
+					class:toc-on-left={isMarkdown && settings.tocSide === 'left'}
+					class:toc-on-right={isMarkdown && settings.tocSide === 'right'}>
 					<!-- Editor Pane -->
-					<div class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
+					<div bind:this={editorPaneEl} class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
 							<Editor
 								bind:this={editorPane}
@@ -1722,11 +2451,18 @@
 					<!-- Splitter -->
 					{#if isSplit}
 						<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-						<div class="split-bar" onmousedown={(e) => startDrag(e, tabManager.activeTabId)} role="separator" aria-orientation="vertical" tabindex="0"></div>
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+						<div class="split-bar" onmousedown={(e) => startDrag(e, tabManager.activeTabId)} onkeydown={handleSplitterKeyDown} role="separator" aria-orientation="vertical" tabindex="0"></div>
 					{/if}
 
 					<!-- Viewer Pane -->
-					<div class="pane viewer-pane" class:active={!isEditing || isSplit} style="flex: {isSplit ? 1 - tabManager.activeTab.splitRatio : !isEditing ? 1 : 0}">
+					<div
+						bind:this={viewerPaneEl}
+						bind:clientWidth={viewerWidth}
+						class="pane viewer-pane"
+						class:active={!isEditing || isSplit}
+						style="flex: {isSplit ? 1 - tabManager.activeTab.splitRatio : (!isEditing) ? 1 : 0}">
+
 						{#if showPreviewSearch}
 							<div class="preview-search-bar" transition:fly={{ y: -30, duration: 150 }}>
 								<div class="preview-search-inner">
@@ -1761,28 +2497,129 @@
 								</div>
 							</div>
 						{/if}
-						<article
-							bind:this={markdownBody}
-							contenteditable="false"
-							class="markdown-body {isFullWidth ? 'full-width' : ''}"
-							onclick={handleDocumentClick}
-							onscroll={handleScroll}
-							tabindex="-1"
-							style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px;">
-						</article>
+
+						<div class="viewer-content">
+							<article
+								bind:this={markdownBody}
+								contenteditable="false"
+								class="markdown-body {isFullWidth ? 'full-width' : ''} {settings.showToc ? 'toc-active' : ''}"
+								onclick={handleDocumentClick}
+								onkeydown={(e) => { if(e.key === 'Enter' || e.key === ' ') handleDocumentClick(e as unknown as MouseEvent); }}
+								onscroll={handleScroll}
+								tabindex="-1"
+								style="outline: none; font-family: {settings.previewFont}, sans-serif; font-size: {settings.previewFontSize}px; flex: 1;">
+							</article>
+							{#if tabManager.activeTabId && loadingTabs.includes(tabManager.activeTabId) && isAtBottom}
+								<div class="loading-chip" transition:fly={{ y: 20, duration: 300, easing: cubicOut }}>
+									<div class="loading-spinner"></div>
+									<span>{t('common.loadingFullDocument', settings.language)}</span>
+								</div>
+							{/if}
+						</div>
 					</div>
+
+					<!-- Unified TOC Support -->
+					{#if isMarkdown && !showHome}
+						<div class="top-fade-mask" style="{settings.tocSide === 'left' ? 'left: 0;' : 'right: 0; left: auto;'}"></div>
+						<button 
+							class="toc-toggle-floating {settings.showToc ? 'expanded' : ''}" 
+							class:on-right={settings.tocSide === 'right'}
+							class:in-edit-mode={isEditing && !settings.showToc}
+							onclick={() => settings.toggleToc()}
+							aria-label={settings.showToc ? t('tooltip.hideTableOfContents', settings.language) : t('tooltip.showTableOfContents', settings.language)}
+							onmouseenter={(e) => {
+								const rect = e.currentTarget.getBoundingClientRect();
+								tooltip = { 
+									show: true, 
+									text: settings.showToc ? t('tooltip.hideTableOfContents', settings.language) : t('tooltip.showTableOfContents', settings.language), 
+									shortcut: '',
+									html: '', 
+									isFootnote: false, 
+									x: settings.tocSide === 'left' ? rect.right + 8 : rect.left - 8, 
+									y: rect.top + rect.height / 2,
+									align: settings.tocSide === 'left' ? 'right' : 'left'
+								};
+							}}
+							onmouseleave={() => tooltip.show = false}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="9 18 15 12 9 6"></polyline>
+							</svg>
+						</button>
+
+						{#if settings.showToc}
+							<div 
+								transition:fly={{ x: settings.tocSide === 'left' ? -240 : 240, duration: 300, opacity: 1, easing: cubicOut }}
+								class="toc-overlay-wrapper" 
+								class:is-overhanging={isOverhanging} 
+								class:is-pinned={settings.pinnedToc}
+								class:on-right={settings.tocSide === 'right'}>
+								<Toc 
+										{markdownBody} 
+										{htmlContent} 
+										onBeforeJump={pushScrollHistory} 
+										{collapsedHeaders} 
+										ontoggleFold={toggleFold} 
+										oncopyref={(text: string) => { const tab = tabManager.activeTab; const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : ''; invoke('clipboard_write_text', { text: fn ? `[[${fn}#${text}]]` : `#${text}` }); }}
+										onjump={(id: string, text: string) => {
+											if (isEditing && editorPane) {
+												editorPane.revealHeader(text);
+											}
+										}}
+										oncontext={(e, item) => {
+											docContextMenu = {
+												show: true,
+												x: e.clientX,
+												y: e.clientY,
+												items: [
+													{ 
+														label: t('menu.copyReference', uiLanguage),
+														onClick: () => {
+															const tab = tabManager.activeTab;
+															const fn = tab?.path ? tab.path.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, '') || '' : '';
+															invoke('clipboard_write_text', { text: fn ? `[[${fn}#${item.text}]]` : `#${item.text}` });
+															docContextMenu.show = false;
+														} 
+													}
+												]
+											};
+										}}
+										onshowTooltip={(e, text, shortcut, align) => {
+											const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+											tooltip = {
+												show: true,
+												text,
+												shortcut: shortcut || '',
+												html: '',
+												isFootnote: false,
+												x: align === 'right' ? rect.right + 8 : (align as any === 'left' ? rect.left - 8 : rect.left + rect.width / 2),
+												y: align === 'right' || align as any === 'left' ? rect.top + rect.height / 2 : (align === 'below' ? rect.bottom + 8 : rect.top - 8),
+												align: align || 'top'
+											};
+										}}
+										onhideTooltip={() => tooltip.show = false}
+								/>
+							</div>
+						{/if}
+					{/if}
 				</div>
 			</div>
-		{/key}
 	{:else}
 		<HomePage {recentFiles} onselectFile={selectFile} onloadFile={loadMarkdown} onremoveRecentFile={removeRecentFile} onnewFile={handleNewFile} />
 	{/if}
 
-	{#if tooltip.show}
-		<div class="tooltip" style="left: {tooltip.x}px; top: {tooltip.y}px;">
-			{tooltip.text}
-		</div>
-	{/if}
+	<div 
+		class="tooltip align-{tooltip.align} {tooltip.show ? 'visible' : ''}" 
+		class:footnote-tooltip={tooltip.isFootnote} 
+		style="left: {tooltip.x}px; top: {tooltip.y}px;">
+		{#if tooltip.isFootnote}
+			{@html tooltip.html}
+		{:else}
+			<span class="tooltip-text">{tooltip.text}</span>
+			{#if tooltip.shortcut}
+				<span class="tooltip-shortcut">{tooltip.shortcut}</span>
+			{/if}
+		{/if}
+	</div>
 
 	<Modal
 		show={modalState.show}
@@ -1794,24 +2631,40 @@
 		onsave={handleModalSave}
 		oncancel={handleModalCancel} />
 
-	{#if isDragging && !isEditing}
+	<div class="toast-container">
+		{#each toasts as toast (toast.id)}
+			<Toast 
+				message={toast.message} 
+				type={toast.type} 
+				onremove={() => toasts = toasts.filter(t => t.id !== toast.id)} />
+		{/each}
+	</div>
+
+	{#if zoomData}
+		<ZoomOverlay 
+			src={zoomData.src} 
+			html={zoomData.html} 
+			onclose={() => zoomData = null} 
+		/>
+	{/if}
+
+	{#if isDragging}
 		<div class="drag-overlay" role="presentation">
-			<div class="drag-message">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					width="48"
-					height="48"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round">
-					<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-					<polyline points="17 8 12 3 7 8" />
-					<line x1="12" y1="3" x2="12" y2="15" />
-				</svg>
-				<span>Drop to open Markdown files</span>
+			<div class="drag-zones" class:split={isSplit}>
+				{#if isSplit || isEditing}
+					<div class="drag-zone editor-zone" class:active={dragTarget === 'editor'}>
+								<div class="drag-message">
+									<span>{t('dragAndDrop.embed')}</span>
+								</div>
+							</div>
+				{/if}
+				{#if isSplit || !isEditing}
+					<div class="drag-zone viewer-zone" class:active={dragTarget === 'preview'}>
+								<div class="drag-message">
+									<span>{t('dragAndDrop.open')}</span>
+								</div>
+							</div>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -1838,10 +2691,56 @@
 		box-sizing: border-box;
 		min-width: 200px;
 		margin: 0;
-		padding: 50px clamp(calc(calc(50% - 390px)), 5vw, 50px);
+		padding: 50px clamp(24px, 5vw, 50px);
 		height: 100%;
 		overflow-y: auto;
+		overflow-x: hidden;
 		transform: translate3d(0, 0, 0);
+		max-width: 100%;
+		text-align: left;
+		overflow-wrap: anywhere;
+	}
+
+	.loading-chip {
+		position: absolute;
+		bottom: 30px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: var(--color-canvas-overlay);
+		border: 1px solid var(--color-border-default);
+		border-radius: 20px;
+		padding: 8px 16px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		z-index: 100;
+		color: var(--color-fg-muted);
+		font-size: 13px;
+		font-family: var(--win-font), sans-serif;
+	}
+
+	.loading-spinner {
+		width: 14px;
+		height: 14px;
+		border: 2px solid var(--color-border-muted);
+		border-top-color: var(--color-accent-fg);
+		border-radius: 50%;
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	@media print {
+		.markdown-body {
+			height: auto !important;
+			overflow: visible !important;
+			padding: 0 !important;
+		}
 	}
 
 	.markdown-container :global(.markdown-body pre),
@@ -1853,27 +2752,11 @@
 	}
 
 	.markdown-body.full-width {
-		padding: 50px;
+		padding: 50px clamp(24px, 5vw, 50px);
 		max-width: 100%;
 	}
 
-	.caret-indicator {
-		position: absolute;
-		height: 2px;
-		background-color: #0078d4;
-		width: 100%;
-		left: 0;
-		right: 0;
-		pointer-events: none;
-		z-index: 100;
-		opacity: 0.8;
-		transform: translateY(2px); /* visual adjustment */
-	}
 
-	/* Disable animation in split view to prevent jumpiness */
-	.split-view .markdown-body {
-		animation: none;
-	}
 
 	@keyframes slideIn {
 		from {
@@ -1918,26 +2801,101 @@
 
 	.tooltip {
 		position: fixed;
-		background: var(--color-canvas-default);
+		background: var(--color-canvas-overlay);
 		color: var(--color-fg-default);
-		padding: 6px 10px;
-		border-radius: 4px;
-		font-size: 12px;
+		padding: 4px 8px;
+		border-radius: 6px;
+		font-size: 11px;
 		pointer-events: none;
-		z-index: 10000;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+		z-index: 10007;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 		border: 1px solid var(--color-border-default);
-		font-family: var(--win-font);
+		font-family: var(--win-font), 'Segoe UI', sans-serif;
 		white-space: nowrap;
 		max-width: 400px;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		transform: translate(-50%, -100%);
-		transition: opacity 0.15s ease-out;
-		opacity: 1;
+		transform: translateX(-50%) translateY(calc(-100% + 4px));
+		opacity: 0;
+		transition: 
+			opacity 0.15s ease,
+			transform 0.15s ease,
+			left 0.15s ease,
+			top 0.15s ease;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
 	}
 
-	.tooltip::after {
+	.tooltip.visible {
+		opacity: 1;
+		transform: translateX(-50%) translateY(-100%);
+	}
+
+	.tooltip.align-below {
+		transform: translateX(-50%) translateY(-4px);
+	}
+
+	.tooltip.align-below.visible {
+		transform: translateX(-50%) translateY(0);
+	}
+
+	.tooltip-text {
+		display: block;
+	}
+
+	.tooltip-shortcut {
+		color: var(--color-fg-muted);
+		font-size: 10px;
+		font-family: inherit;
+	}
+
+	.tooltip.align-right {
+		transform: translateX(4px) translateY(-50%);
+	}
+
+	.tooltip.align-right.visible {
+		transform: translateX(0) translateY(-50%);
+		align-items: flex-start;
+	}
+
+	.tooltip.align-left {
+		transform: translateX(calc(-100% - 4px)) translateY(-50%);
+	}
+
+	.tooltip.align-left.visible {
+		transform: translateX(-100%) translateY(-50%);
+		align-items: flex-end;
+	}
+
+
+	.tooltip.footnote-tooltip {
+		white-space: normal;
+		max-width: 500px;
+		text-align: left;
+		line-height: 1.5;
+		padding: 10px 14px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+		transform: translate(-50%, calc(-100% + 4px));
+		margin-top: -8px;
+		display: block; /* reset flex for footnotes */
+	}
+
+	.tooltip.footnote-tooltip.visible {
+		transform: translate(-50%, -100%);
+	}
+	
+	:global(.tooltip.footnote-tooltip p) {
+		margin: 0;
+		padding: 0;
+	}
+
+    :global(.tooltip.footnote-tooltip p + p) {
+        margin-top: 8px;
+    }
+
+	.tooltip.footnote-tooltip::after {
 		content: '';
 		position: absolute;
 		bottom: -6px;
@@ -1945,47 +2903,66 @@
 		transform: translateX(-50%);
 		border-left: 6px solid transparent;
 		border-right: 6px solid transparent;
-		border-top: 6px solid var(--color-canvas-default);
+		border-top: 6px solid var(--color-canvas-overlay);
 	}
 
-	.editor-wrapper {
-		width: 100%;
-		height: 100%;
-		position: absolute;
-		top: 0;
-		left: 0;
-		padding-top: 36px;
-		box-sizing: border-box;
-	}
 
 	.drag-overlay {
 		position: fixed;
-		top: 0;
+		top: 36px;
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: rgba(0, 120, 212, 0.15);
-		backdrop-filter: blur(4px);
-		border: 3px dashed #0078d4;
-		margin: 12px;
-		border-radius: 12px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 40000;
 		pointer-events: none;
-		animation: fadeIn 0.15s ease-out;
+		z-index: 40000;
+		animation: fadeIn 0.1s ease-out;
 	}
 
 	.drag-message {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 16px;
-		color: #0078d4;
+		color: #ffffff;
 		font-family: var(--win-font);
 		font-weight: 500;
-		font-size: 18px;
+		font-size: 13px;
+		position: absolute;
+		bottom: 40px;
+		left: 50%;
+		transform: translateX(-50%);
+		white-space: nowrap;
+		background: var(--color-accent-fg);
+		padding: 6px 14px;
+		border-radius: 20px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+		pointer-events: none;
+	}
+
+	.drag-zones {
+		display: flex;
+		width: 100%;
+		height: 100%;
+		gap: 12px;
+	}
+
+	.drag-zone {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		transition: background 0.2s, border-color 0.2s, opacity 0.2s;
+		border: 2px dashed transparent;
+		opacity: 0;
+		position: relative;
+		margin: 8px;
+		border-radius: 12px;
+	}
+
+	.drag-zone.active {
+		background: color-mix(in srgb, var(--color-accent-fg) 8%, transparent);
+		border-color: color-mix(in srgb, var(--color-accent-fg) 30%, transparent);
+		opacity: 1;
 	}
 
 	@keyframes fadeIn {
@@ -2076,6 +3053,14 @@
 		background: var(--color-canvas-default);
 	}
 
+	.viewer-content {
+		display: flex;
+		flex-direction: row;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+
 	/* View Mode */
 	.layout-container:not(.split):not(.editing) .editor-pane {
 		width: 0 !important;
@@ -2122,10 +3107,204 @@
 		background: var(--color-accent-fg);
 	}
 
-	.editor-wrapper {
-		/* Legacy mapping */
-		width: 100%;
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	.toast-container {
+		position: fixed;
+		bottom: 24px;
+		right: 24px;
+		z-index: 50000;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		pointer-events: none;
+	}
+	.top-fade-mask {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 60px;
+		height: 52px;
+		background: linear-gradient(to bottom, var(--color-canvas-default) 40%, transparent 100%);
+		pointer-events: none;
+		z-index: 50;
+	}
+
+	.toc-overlay-wrapper {
+		position: absolute;
+		top: 36px;
+		left: 0;
+		bottom: 0;
+		z-index: 1000;
+		height: calc(100% - 36px);
+		background-color: var(--color-canvas-default);
+		border-right: 1px solid transparent;
+		border-left: 1px solid transparent;
+		box-shadow: 10px 0 30px rgba(0, 0, 0, 0);
+		transition: box-shadow 0.3s ease, border-color 0.3s ease, left 0.3s ease, right 0.3s ease;
+		order: -1;
+	}
+
+	.toc-overlay-wrapper.is-pinned {
+		position: relative;
+		top: 0 !important;
 		height: 100%;
+		z-index: 10;
+		background-color: transparent;
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+		box-shadow: none !important;
+	}
+	.layout-container.editing.has-pinned-toc.toc-on-left .editor-pane {
+		padding-left: 40px;
+	}
+	
+	.layout-container.editing.has-pinned-toc.toc-on-right .editor-pane {
+		padding-right: 40px;
+	}
+
+	.editor-pane {
+		transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	}
+
+	.toc-overlay-wrapper.on-right {
+		left: auto;
+		right: 0;
+		order: 2;
+	}
+
+	.toc-overlay-wrapper.is-pinned.on-right {
+		border-left-color: var(--color-border-default);
+	}
+	
+	.toc-overlay-wrapper.is-pinned:not(.on-right) {
+		border-right-color: var(--color-border-default);
+	}
+
+	.toc-overlay-wrapper.is-overhanging:not(.is-pinned) {
+		border-right-color: var(--color-border-default);
+		box-shadow: 10px 0 30px rgba(0, 0, 0, 0.12);
+	}
+	
+	.toc-overlay-wrapper.is-overhanging.on-right:not(.is-pinned) {
+		border-left-color: var(--color-border-default);
+		box-shadow: -10px 0 30px rgba(0, 0, 0, 0.12);
+	}
+
+	.toc-toggle-floating {
+		position: absolute;
+		top: 48px;
+		left: 8px;
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: transparent;
+		border: none;
+		border-radius: 4px;
+		color: var(--color-fg-muted);
+		cursor: pointer;
+		z-index: 1001;
+		transition: 
+			left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+			background-color 0.2s ease,
+			color 0.2s ease,
+			opacity 0.2s ease,
+			transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		opacity: 0.6;
+		padding: 0;
+	}
+
+	.toc-toggle-floating.expanded {
+		left: 24px;
+	}
+
+	.toc-toggle-floating.on-right {
+		left: auto;
+		right: 8px;
+	}
+
+	.toc-toggle-floating.on-right.expanded {
+		right: 24px;
+	}
+
+	.layout-container:hover .toc-toggle-floating,
+	.toc-toggle-floating:hover {
+		opacity: 1;
+	}
+
+	.toc-toggle-floating:active {
+		background-color: var(--color-border-muted);
+	}
+
+	.toc-toggle-floating svg {
+		transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		transform: rotate(0deg);
+	}
+	
+	.toc-toggle-floating.on-right svg {
+		transform: rotate(180deg);
+	}
+
+	.toc-toggle-floating.expanded svg {
+		transform: rotate(180deg);
+	}
+	
+	.toc-toggle-floating.on-right.expanded svg {
+		transform: rotate(0deg);
+	}
+
+	.layout-container {
+		transition: padding 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.layout-container.has-pinned-toc.toc-on-left {
+		padding-left: 240px;
+	}
+
+	.layout-container.has-pinned-toc.toc-on-right {
+		padding-right: 240px;
+	}
+
+	.toc-overlay-wrapper {
+		width: 240px;
+	}
+
+	.toc-overlay-wrapper.is-pinned {
+		position: absolute; /* Keep it absolute but it will stay in the padded area */
+		top: 36px !important;
+		left: 0;
+		height: calc(100% - 36px);
+		background-color: var(--color-canvas-default);
+		border-right: 1px solid var(--color-border-default);
+	}
+
+	.toc-overlay-wrapper.is-pinned.on-right {
+		left: auto;
+		right: 0;
+		border-right: none;
+		border-left: 1px solid var(--color-border-default);
+	}
+
+	.layout-container.editing .toc-overlay-wrapper:not(.on-right) {
+		border-right-color: var(--color-border-default);
+	}
+
+	.layout-container.editing .toc-overlay-wrapper.on-right {
+		border-left-color: var(--color-border-default);
+	}
+
+	.toc-toggle-floating.in-edit-mode:not(.expanded) {
+		background-color: var(--color-canvas-default);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		border: 1px solid var(--color-border-default);
+		opacity: 0.9;
+		backdrop-filter: blur(8px);
+		-webkit-backdrop-filter: blur(8px);
 	}
 
 	/* Preview Search */

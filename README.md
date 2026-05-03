@@ -49,6 +49,10 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - Image and YouTube embeds
 - Custom typography and font settings
 - Content zooming
+- Table of contents
+- Custom themes
+- Paste images into editor
+- PDF and HTML export
 
 ### General
 - Auto-reload on file changes
@@ -79,10 +83,25 @@ Please ensure your code follows the existing style and that you add descriptions
 
 ## Screenshots
 
+#### Split view
 ![split view](pics/splitview.png)
+#### Home page
 ![home page](pics/home.png)
+#### Split view minimal
 ![split view minimal](pics/splitview-minimal.png)
+#### Code blocks
 ![code block](pics/codeblock.png)
+#### Light mode
 ![light mode](pics/lightmode.png)
+#### Settings
 ![settings](pics/settings.png)
+#### Zen mode
 ![zen mode](pics/zenmode-view.png)
+#### Theme settings
+![theme setting](pics/theme-setting.png)
+#### Table of contents
+![toc](pics/toc.png)
+#### Theme example
+![theme example](pics/theme-example.png)
+#### Drag and drop
+![drag and drop](pics/drag-and-drop.png)

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	declare const __BUILD_DATE__: string;
+	import { t } from '../utils/i18n.js';
+	import { settings } from '../stores/settings.svelte.js';
 
 	let { recentFiles, onselectFile, onloadFile, onremoveRecentFile, onnewFile } = $props<{
 		recentFiles: string[];
@@ -18,7 +19,7 @@
 </script>
 
 <div class="message">
-	<p>Open a Markdown file</p>
+	<p>{t('home.welcomeToMarkpad', settings.language)}</p>
 	<div class="actions-row">
 		<button class="fluent-btn primary" onclick={onselectFile}>
 			<svg
@@ -31,7 +32,7 @@
 				stroke-width="2"
 				stroke-linecap="round"
 				stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
-			Open file
+			{t('home.openFile', settings.language)}
 		</button>
 		<button class="fluent-btn secondary" onclick={onnewFile}>
 			<svg
@@ -44,12 +45,12 @@
 				stroke-width="2"
 				stroke-linecap="round"
 				stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-			New file
+			{t('home.newFile', settings.language)}
 		</button>
 	</div>
 
 	<div class="recent-section">
-		<h3>Recent Files</h3>
+		<h3>{t('home.recentFiles', settings.language)}</h3>
 		{#if recentFiles.length > 0}
 			<div class="recent-grid">
 				{#each recentFiles as file}
@@ -95,7 +96,7 @@
 				{/each}
 			</div>
 		{:else}
-			<p class="empty-recent">Your recently opened files will appear here.</p>
+			<p class="empty-recent">{t('home.noRecentFiles', settings.language)}</p>
 		{/if}
 	</div>
 </div>
@@ -135,8 +136,8 @@
 	}
 
 	.fluent-btn.primary {
-		background: #0078d4;
-		color: white;
+		background: var(--color-accent-fg);
+		color: var(--color-btn-fg);
 		border: 1px solid rgba(0, 0, 0, 0.1);
 	}
 
