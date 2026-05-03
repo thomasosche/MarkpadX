@@ -1717,6 +1717,8 @@ import { t } from './utils/i18n.js';
 			const rawHref = anchor.getAttribute('href');
 			if (!rawHref) return;
 
+			tooltip.show = false;
+
 			// Anchor links: scroll within the preview article
 			if (rawHref.startsWith('#') && markdownBody) {
 				event.preventDefault();
