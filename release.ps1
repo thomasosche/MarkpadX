@@ -10,6 +10,7 @@ $red    = "$e[31m"
 $green  = "$e[32m"
 $yellow = "$e[33m"
 $cyan   = "$e[36m"
+$magenta = "$e[35m"
 $gray   = "$e[90m"
 
 $check  = [char]0x2714
@@ -30,15 +31,6 @@ function Write-Fail($msg) {
     Write-Host "        ${red}${cross}${reset} ${red}$msg${reset}"
 }
 
-$startTime = Get-Date
-
-Write-Host ""
-Write-Host "  ${bold}${cyan}MarkpadX${reset} ${dim}build${reset}"
-Write-Host "  ${cyan}$rule${reset}"
-Write-Host "  ${gray}start${reset}  $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
-
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
-
 function Invoke-Quiet {
     param([int]$Num, [int]$Total, [string]$Label, [string]$Command)
     Write-Step $Num $Total $Label
@@ -55,21 +47,43 @@ function Invoke-Quiet {
     Write-Ok ("done in {0:N1}s" -f $step.Elapsed.TotalSeconds)
 }
 
-Invoke-Quiet 1 2 "Frontend (vite)"      "npm run build --silent"
-Invoke-Quiet 2 2 "Tauri (cargo, debug)" "npx tauri build --debug --no-bundle"
+$startTime = Get-Date
+
+Write-Host ""
+Write-Host "  ${bold}${magenta}MarkpadX${reset} ${dim}release${reset}  ${yellow}(LTO + bundle)${reset}"
+Write-Host "  ${magenta}$rule${reset}"
+Write-Host "  ${gray}start${reset}  $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
+
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+Invoke-Quiet 1 2 "Frontend (vite)"                "npm run build --silent"
+Invoke-Quiet 2 2 "Tauri (cargo release + bundle)" "npx tauri build"
 
 $sw.Stop()
 $endTime = Get-Date
 $elapsed = "{0:mm\:ss}" -f $sw.Elapsed
 
-$exe = Join-Path $PSScriptRoot "src-tauri\target\debug\Markpad.exe"
+$exe = Join-Path $PSScriptRoot "src-tauri\target\release\Markpad.exe"
+$bundleDir = Join-Path $PSScriptRoot "src-tauri\target\release\bundle"
+
 $size = if (Test-Path $exe) { "{0:N1} MB" -f ((Get-Item $exe).Length / 1MB) } else { "?" }
 
 Write-Host ""
-Write-Host "  ${cyan}$rule${reset}"
+Write-Host "  ${magenta}$rule${reset}"
 Write-Host "  ${gray}start${reset}     $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 Write-Host "  ${gray}end${reset}       $($endTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 Write-Host "  ${gray}duration${reset}  ${bold}${elapsed}${reset}"
-Write-Host "  ${green}${check}${reset} ${bold}Build complete${reset}  ${dim}$size${reset}"
+Write-Host "  ${green}${check}${reset} ${bold}Release build complete${reset}  ${dim}$size${reset}"
 Write-Host "  ${gray}${arrow}${reset} ${cyan}$exe${reset}"
+
+if (Test-Path $bundleDir) {
+    Write-Host ""
+    Write-Host "  ${bold}Bundles:${reset}"
+    Get-ChildItem -Path $bundleDir -Recurse -File -Include *.msi, *.exe, *.nsis, *.deb, *.AppImage, *.dmg, *.rpm |
+        ForEach-Object {
+            $relSize = "{0:N1} MB" -f ($_.Length / 1MB)
+            Write-Host "  ${gray}${arrow}${reset} ${cyan}$($_.FullName)${reset}  ${dim}$relSize${reset}"
+        }
+}
+
 Write-Host ""
