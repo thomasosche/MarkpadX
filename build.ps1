@@ -37,6 +37,13 @@ Write-Host "  ${bold}${cyan}MarkpadX${reset} ${dim}build${reset}"
 Write-Host "  ${cyan}$rule${reset}"
 Write-Host "  ${gray}start${reset}  $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 
+$running = Get-Process -Name "Markpad" -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "  ${yellow}!${reset} killing $($running.Count) running Markpad instance(s)"
+    $running | Stop-Process -Force
+    Start-Sleep -Milliseconds 300
+}
+
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
 function Invoke-Quiet {
