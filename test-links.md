@@ -57,6 +57,10 @@ A: Yes! Clicking a `#section` link scrolls to the matching heading.
 
 [Open test-folder/](test-folder/)
 
+### Link to a PDF (opens in default PDF viewer)
+
+[Open demo.pdf](demo.pdf)
+
 ### External HTTP link (opens in default browser)
 
 <a href="https://carrybit.de">carrybit.de</a>
