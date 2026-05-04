@@ -20,6 +20,7 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - **Anchor links** (`[Section](#section)`) — smoothly scrolls to the target heading within the document
 - **Markdown file links** (`[Notes](notes.md)`) — opens the linked `.md` file in a new tab; if the file is already open in another tab, that tab is focused and refreshed from disk instead of duplicating it (path comparison normalizes slashes and case)
 - **Folder links** (`[Docs](docs/)`) — opens the folder in Windows Explorer
+- **File links** (`[Report](path/to/report.pdf)`) — opens the file with the system's default application (e.g. PDFs in your PDF viewer, images in your image viewer)
 - **HTTP links** — open in the default browser
 - Hovering any link shows a tooltip with the resolved target path
 

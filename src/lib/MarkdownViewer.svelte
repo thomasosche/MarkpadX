@@ -5,7 +5,7 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
-	import { openUrl } from '@tauri-apps/plugin-opener';
+	import { openUrl, openPath } from '@tauri-apps/plugin-opener';
 	import { open, save, ask } from '@tauri-apps/plugin-dialog';
 	import Installer from './Installer.svelte';
 	import Uninstaller from './Uninstaller.svelte';
@@ -1685,18 +1685,12 @@ import { t } from './utils/i18n.js';
 			}
 
 			// resolve folder and markdown file links to absolute paths for the tooltip
-			let tooltipText = anchor.href;
-			if (rawHref.endsWith('/') && !rawHref.match(/^[a-z]+:\/\//i)) {
-				tooltipText = resolvePath(currentFile, decodeURIComponent(rawHref.slice(0, -1)));
+			let tooltipText: string;
+			if (rawHref.match(/^[a-z]+:\/\//i)) {
+				tooltipText = rawHref;
 			} else {
-				const isMarkdownLink = ['.md', '.markdown', '.mdown', '.mkd'].some((ext) => {
-					const urlNoHash = rawHref.split('#')[0].split('?')[0];
-					return urlNoHash.toLowerCase().endsWith(ext);
-				});
-				if (isMarkdownLink && !rawHref.match(/^[a-z]+:\/\//i)) {
-					const urlNoHash = rawHref.split('#')[0].split('?')[0];
-					tooltipText = resolvePath(currentFile, decodeURIComponent(urlNoHash));
-				}
+				const cleaned = rawHref.endsWith('/') ? rawHref.slice(0, -1) : rawHref.split('#')[0].split('?')[0];
+				tooltipText = resolvePath(currentFile, decodeURIComponent(cleaned));
 			}
 
 			const rect = anchor.getBoundingClientRect();
@@ -1760,9 +1754,13 @@ import { t } from './utils/i18n.js';
 				return;
 			}
 
-			if (anchor.href) {
-				event.preventDefault();
-				await openUrl(anchor.href);
+			event.preventDefault();
+			if (!rawHref.match(/^[a-z]+:\/\//i)) {
+				const decoded = decodeURIComponent(rawHref);
+				const resolved = resolvePath(currentFile, decoded);
+				await openPath(resolved);
+			} else {
+				await openUrl(rawHref);
 			}
 		}
 	}

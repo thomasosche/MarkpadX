@@ -13,4 +13,4 @@ test_image.png
 src-tauri/output.txt
 install-local.bat
 build.bat
-
+copy-exe.bat
