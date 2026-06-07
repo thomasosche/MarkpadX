@@ -33,7 +33,7 @@ function Write-Fail($msg) {
 $startTime = Get-Date
 
 Write-Host ""
-Write-Host "  ${bold}${cyan}MarkpadX${reset} ${dim}build${reset}"
+Write-Host "  ${bold}${cyan}MarkpadX${reset} ${dim}debug build${reset}"
 Write-Host "  ${cyan}$rule${reset}"
 Write-Host "  ${gray}start${reset}  $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 
