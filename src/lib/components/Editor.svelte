@@ -13,6 +13,7 @@
 	import { initVimMode } from "monaco-vim";
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
+	import { byteColToIndex, indexToByteCol, IGNORED_CLASS, normalize, type SourceSelection } from '../utils/selection.js';
 
 	let {
 		value = $bindable(),
@@ -1124,52 +1125,51 @@
 	export const revealLine = (line: number) => editor?.revealLineInCenter(line);
 
 	// Current selection (or caret) for carrying it over to the preview on mode switch
-	export function getSelectionInfo(): { text: string; startLine: number; endLine: number; occurrence: number } | null {
+	export function getSelectionInfo(): SourceSelection | null {
 		const model = editor?.getModel();
 		const sel = editor?.getSelection();
 		if (!model || !sel) return null;
-		const text = model.getValueInRange(sel);
-		// Occurrence index of the selected text within its first source line
-		let occurrence = 0;
-		if (text) {
-			const before = model.getLineContent(sel.startLineNumber).slice(0, sel.startColumn - 1);
-			let idx = before.indexOf(text);
-			while (idx !== -1) {
-				occurrence++;
-				idx = before.indexOf(text, idx + 1);
-			}
-		}
-		return { text, startLine: sel.startLineNumber, endLine: sel.endLineNumber, occurrence };
+		const lineText = model.getLineContent(sel.startLineNumber);
+		return {
+			text: model.getValueInRange(sel),
+			startLine: sel.startLineNumber,
+			endLine: sel.endLineNumber,
+			startColumn: indexToByteCol(lineText, sel.startColumn - 1),
+			lineText,
+			occurrence: 0,
+		};
 	}
 
-	// Select text coming from the preview, preferring matches inside the given source line range
-	export function selectSourceText(text: string, startLine: number, endLine: number, occurrence = 0) {
+	// Select text coming from the preview, searching from the start of its source block
+	export function selectSourceText(info: SourceSelection) {
 		const model = editor?.getModel();
 		if (!model) return;
 		const lineCount = model.getLineCount();
-		const from = Math.max(1, Math.min(lineCount, startLine));
-		const to = Math.max(from, Math.min(lineCount, endLine));
-		const blockRange = new monaco.Range(from, 1, to, model.getLineMaxColumn(to));
+		const from = Math.max(1, Math.min(lineCount, info.startLine));
+		const to = Math.max(from, Math.min(lineCount, info.endLine));
+		const fromCol = byteColToIndex(model.getLineContent(from), info.startColumn) + 1;
+		const blockRange = new monaco.Range(from, fromCol, to, model.getLineMaxColumn(to));
 
 		let range: monaco.Range | null = null;
-		const trimmed = text.trim();
-		if (trimmed) {
+		const needle = normalize(info.text);
+		if (needle) {
 			const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			// Exact text first, then a pattern tolerating inline markdown syntax and differing whitespace
-			const loose = Array.from(trimmed.replace(/\s+/g, ' '))
-				.map((ch) => (ch === ' ' ? '\\s+' : escape(ch)))
-				.join('[*_~`\\\\]*');
-			for (const [search, isRegex] of [[escape(trimmed), true], [loose, true]] as [string, boolean][]) {
-				const inBlock = model.findMatches(search, blockRange, isRegex, true, null, false);
-				const match = inBlock[Math.min(occurrence, inBlock.length - 1)]
-					?? model.findNextMatch(search, { lineNumber: from, column: 1 }, isRegex, true, null, false);
+			// Rendered text lacks markdown syntax: allow syntax chars between characters and
+			// any whitespace (including newlines, which puts Monaco into multiline search) for spaces
+			const loose = Array.from(needle)
+				.map((ch) => (ch === ' ' ? '(?:\\s|\\n)+' : escape(ch)))
+				.join(IGNORED_CLASS);
+			for (const search of [escape(info.text.trim()), loose]) {
+				const inBlock = model.findMatches(search, blockRange, true, true, null, false);
+				const match = inBlock[Math.min(info.occurrence, inBlock.length - 1)]
+					?? model.findNextMatch(search, { lineNumber: from, column: fromCol }, true, true, null, false);
 				if (match) {
 					range = match.range;
 					break;
 				}
 			}
 		}
-		if (!range) range = new monaco.Range(from, 1, from, 1);
+		if (!range) range = new monaco.Range(from, fromCol, from, fromCol);
 
 		editor.setSelection(range);
 		editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Immediate);

@@ -19,6 +19,16 @@
 	import { exportAsHtml as _exportHtml, exportAsPdf } from './utils/export';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+	import {
+		byteColToIndex,
+		findAll,
+		normalize,
+		normalizeWithMap,
+		parseSourcepos,
+		sourceposContains,
+		sourceToPlain,
+		type SourceSelection,
+	} from './utils/selection';
 
 	const appWindow = getCurrentWindow();
 
@@ -75,8 +85,8 @@ import { t } from './utils/i18n.js';
 		undo: () => void;
 		redo: () => void;
 		revealHeader: (text: string) => void;
-		getSelectionInfo: () => { text: string; startLine: number; endLine: number; occurrence: number } | null;
-		selectSourceText: (text: string, startLine: number, endLine: number, occurrence?: number) => void;
+		getSelectionInfo: () => SourceSelection | null;
+		selectSourceText: (info: SourceSelection) => void;
 	} | null>(null);
 	let liveMode = $state(localStorage.getItem('liveMode') !== 'false');
 
@@ -1303,29 +1313,7 @@ import { t } from './utils/i18n.js';
 		return true; // discard
 	}
 
-	type SourceSelection = { text: string; startLine: number; endLine: number; occurrence: number };
-
-	function parseSourcepos(el: Element): [number, number] | null {
-		const sourcepos = (el as HTMLElement).dataset?.sourcepos;
-		if (!sourcepos) return null;
-		const [start, end] = sourcepos.split('-');
-		const startLine = parseInt(start.split(':')[0]);
-		const endLine = parseInt((end ?? start).split(':')[0]);
-		return isNaN(startLine) || isNaN(endLine) ? null : [startLine, endLine];
-	}
-
-	function countOccurrences(haystack: string, needle: string): number {
-		if (!needle) return 0;
-		let count = 0;
-		let idx = haystack.indexOf(needle);
-		while (idx !== -1) {
-			count++;
-			idx = haystack.indexOf(needle, idx + 1);
-		}
-		return count;
-	}
-
-	// Map the preview's text selection to source lines so the editor can select the same text
+	// Map the preview's text selection to its source block so the editor can select the same text
 	function captureViewSelection(): SourceSelection | null {
 		const sel = window.getSelection();
 		if (!markdownBody || !sel || sel.rangeCount === 0) return null;
@@ -1347,76 +1335,87 @@ import { t } from './utils/i18n.js';
 		const before = document.createRange();
 		before.setStart(startBlock, 0);
 		before.setEnd(range.startContainer, range.startOffset);
-		const occurrence = countOccurrences(before.toString(), text.trim());
 
-		return { text, startLine: startPos[0], endLine: Math.max(startPos[1], endPos[1]), occurrence };
+		return {
+			text,
+			startLine: startPos.startLine,
+			endLine: Math.max(startPos.endLine, endPos.endLine),
+			startColumn: startPos.startCol,
+			occurrence: findAll(normalize(before.toString()), normalize(text)).length,
+		};
+	}
+
+	// Find the (normalized) needle inside an element's rendered text and return it as a DOM range
+	function findInElement(el: HTMLElement, needle: string, info: SourceSelection): Range | null {
+		const nodes: Text[] = [];
+		let full = '';
+		const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+		while (walker.nextNode()) {
+			nodes.push(walker.currentNode as Text);
+			full += (walker.currentNode as Text).data;
+		}
+		const { text, map } = normalizeWithMap(full);
+		const matches = findAll(text, needle);
+		if (matches.length === 0) return null;
+
+		let index = matches[0];
+		const pos = parseSourcepos(el);
+		if (matches.length > 1 && pos) {
+			if (pos.startLine === info.startLine && info.lineText !== undefined) {
+				// Count earlier occurrences between the element's start and the selection on the same source line
+				const prefix = info.lineText.slice(
+					byteColToIndex(info.lineText, pos.startCol),
+					byteColToIndex(info.lineText, info.startColumn),
+				);
+				const occurrence = findAll(normalize(sourceToPlain(prefix)), needle).length;
+				index = matches[Math.min(occurrence, matches.length - 1)];
+			} else {
+				// Selection starts further down a multi-line element: pick the match at the closest relative position
+				const target = ((info.startLine - pos.startLine) / Math.max(1, pos.endLine - pos.startLine)) * text.length;
+				index = matches.reduce((best, m) => (Math.abs(m - target) < Math.abs(best - target) ? m : best));
+			}
+		}
+
+		const locate = (offset: number): [Text, number] => {
+			for (const node of nodes) {
+				if (offset <= node.data.length) return [node, offset];
+				offset -= node.data.length;
+			}
+			const last = nodes[nodes.length - 1];
+			return [last, last.data.length];
+		};
+		const range = document.createRange();
+		range.setStart(...locate(map[index]));
+		range.setEnd(...locate(map[index + needle.length - 1] + 1));
+		return range;
 	}
 
 	// Select the editor's selected text in the rendered preview and scroll it into view
 	function applyViewSelection(info: SourceSelection) {
 		if (!markdownBody) return;
 
-		// Innermost element whose source range contains the selection's first line
-		let block: HTMLElement | null = null;
-		let blockPos: [number, number] | null = null;
-		for (const el of Array.from(markdownBody.querySelectorAll<HTMLElement>('[data-sourcepos]'))) {
-			const pos = parseSourcepos(el);
-			if (!pos || info.startLine < pos[0] || info.startLine > pos[1]) continue;
-			if (!blockPos || pos[1] - pos[0] <= blockPos[1] - blockPos[0]) {
-				block = el;
-				blockPos = pos;
-			}
-		}
-		if (!block || !blockPos) return;
+		// Elements on the selection's line, innermost first; those also containing its column
+		// come first (table cells, inline elements), with line-only matches as fallback
+		const onLine = Array.from(markdownBody.querySelectorAll<HTMLElement>('[data-sourcepos]'))
+			.filter((el) => {
+				const pos = parseSourcepos(el);
+				return pos && sourceposContains(pos, info.startLine);
+			})
+			.reverse();
+		if (onLine.length === 0) return;
+		const atPoint = onLine.filter((el) => sourceposContains(parseSourcepos(el)!, info.startLine, info.startColumn));
+		const candidates = [...atPoint, ...onLine.filter((el) => !atPoint.includes(el))];
 
-		// Strip inline markdown syntax so the source text matches the rendered text
-		const needle = info.text
-			.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-			.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, '')
-			.replace(/[*_~`]/g, '')
-			.replace(/\s+/g, ' ')
-			.trim();
-
+		const needle = normalize(sourceToPlain(info.text));
 		let range: Range | null = null;
 		if (needle) {
-			const nodes: Text[] = [];
-			let full = '';
-			const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
-			while (walker.nextNode()) {
-				nodes.push(walker.currentNode as Text);
-				full += (walker.currentNode as Text).data;
-			}
-
-			const pattern = needle
-				.split(' ')
-				.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-				.join('\\s+');
-			const matches = Array.from(full.matchAll(new RegExp(pattern, 'g')));
-			if (matches.length > 0) {
-				let match = matches[0];
-				if (blockPos[0] === info.startLine) {
-					match = matches[Math.min(info.occurrence, matches.length - 1)];
-				} else {
-					// Multi-line block: pick the match closest to the line's relative position
-					const target = ((info.startLine - blockPos[0]) / Math.max(1, blockPos[1] - blockPos[0])) * full.length;
-					match = matches.reduce((best, m) => (Math.abs(m.index! - target) < Math.abs(best.index! - target) ? m : best));
-				}
-
-				const locate = (offset: number): [Text, number] => {
-					for (const node of nodes) {
-						if (offset <= node.data.length) return [node, offset];
-						offset -= node.data.length;
-					}
-					const last = nodes[nodes.length - 1];
-					return [last, last.data.length];
-				};
-				range = document.createRange();
-				range.setStart(...locate(match.index!));
-				range.setEnd(...locate(match.index! + match[0].length));
+			for (const el of candidates) {
+				range = findInElement(el, needle, info);
+				if (range) break;
 			}
 		}
 
-		const rect = (range ?? block).getBoundingClientRect();
+		const rect = (range ?? candidates[0]).getBoundingClientRect();
 		const bodyRect = markdownBody.getBoundingClientRect();
 		const targetScroll = markdownBody.scrollTop + rect.top - bodyRect.top - markdownBody.clientHeight / 2 + rect.height / 2;
 		isProgrammaticScroll = true;
@@ -1493,7 +1492,7 @@ import { t } from './utils/i18n.js';
 			}
 			if (carriedSelection && tab.isEditing) {
 				await tick();
-				editorPane?.selectSourceText(carriedSelection.text, carriedSelection.startLine, carriedSelection.endLine, carriedSelection.occurrence);
+				editorPane?.selectSourceText(carriedSelection);
 			}
 		}
 	}
