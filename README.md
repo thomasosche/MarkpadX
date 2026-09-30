@@ -33,6 +33,12 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - `←` / `→` (preview mode) switch to the previous / next tab
 - Mouse buttons 4 / 5 (back / forward) walk the most-recently-used tab history — clicking a markdown link opens a new tab, mouse-back returns to the originating tab
 
+### Selection Carry-over (Edit ↔ View)
+- Text selected in the rendered preview stays selected in the editor when switching to edit mode, and vice versa
+- After switching to preview, the selection is scrolled into view
+- Works inside table cells and inline formatting — markdown syntax (`*`, `_`, `` ` ``, `~`, `|` …) and whitespace differences are ignored when matching
+- Not active in split view (both panes are already visible)
+
 ### Keyboard Shortcuts Dialog
 - Press `?` (or `Shift+/`) in preview mode to open a grouped reference of every keyboard shortcut (File / View / Find / Zoom / Tabs)
 - OS-aware: shows `⌘` on macOS, `Ctrl` on Windows / Linux
