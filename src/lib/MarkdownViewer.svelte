@@ -75,6 +75,8 @@ import { t } from './utils/i18n.js';
 		undo: () => void;
 		redo: () => void;
 		revealHeader: (text: string) => void;
+		getSelectionInfo: () => { text: string; startLine: number; endLine: number; occurrence: number } | null;
+		selectSourceText: (text: string, startLine: number, endLine: number, occurrence?: number) => void;
 	} | null>(null);
 	let liveMode = $state(localStorage.getItem('liveMode') !== 'false');
 
@@ -1301,10 +1303,139 @@ import { t } from './utils/i18n.js';
 		return true; // discard
 	}
 
+	type SourceSelection = { text: string; startLine: number; endLine: number; occurrence: number };
+
+	function parseSourcepos(el: Element): [number, number] | null {
+		const sourcepos = (el as HTMLElement).dataset?.sourcepos;
+		if (!sourcepos) return null;
+		const [start, end] = sourcepos.split('-');
+		const startLine = parseInt(start.split(':')[0]);
+		const endLine = parseInt((end ?? start).split(':')[0]);
+		return isNaN(startLine) || isNaN(endLine) ? null : [startLine, endLine];
+	}
+
+	function countOccurrences(haystack: string, needle: string): number {
+		if (!needle) return 0;
+		let count = 0;
+		let idx = haystack.indexOf(needle);
+		while (idx !== -1) {
+			count++;
+			idx = haystack.indexOf(needle, idx + 1);
+		}
+		return count;
+	}
+
+	// Map the preview's text selection to source lines so the editor can select the same text
+	function captureViewSelection(): SourceSelection | null {
+		const sel = window.getSelection();
+		if (!markdownBody || !sel || sel.rangeCount === 0) return null;
+		const range = sel.getRangeAt(0);
+		if (!markdownBody.contains(range.startContainer)) return null;
+
+		const blockOf = (node: Node) => {
+			const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+			const block = el?.closest('[data-sourcepos]');
+			return block && markdownBody!.contains(block) ? block : null;
+		};
+		const startBlock = blockOf(range.startContainer);
+		const startPos = startBlock && parseSourcepos(startBlock);
+		if (!startBlock || !startPos) return null;
+		const endBlock = blockOf(range.endContainer);
+		const endPos = (endBlock && parseSourcepos(endBlock)) || startPos;
+
+		const text = sel.toString();
+		const before = document.createRange();
+		before.setStart(startBlock, 0);
+		before.setEnd(range.startContainer, range.startOffset);
+		const occurrence = countOccurrences(before.toString(), text.trim());
+
+		return { text, startLine: startPos[0], endLine: Math.max(startPos[1], endPos[1]), occurrence };
+	}
+
+	// Select the editor's selected text in the rendered preview and scroll it into view
+	function applyViewSelection(info: SourceSelection) {
+		if (!markdownBody) return;
+
+		// Innermost element whose source range contains the selection's first line
+		let block: HTMLElement | null = null;
+		let blockPos: [number, number] | null = null;
+		for (const el of Array.from(markdownBody.querySelectorAll<HTMLElement>('[data-sourcepos]'))) {
+			const pos = parseSourcepos(el);
+			if (!pos || info.startLine < pos[0] || info.startLine > pos[1]) continue;
+			if (!blockPos || pos[1] - pos[0] <= blockPos[1] - blockPos[0]) {
+				block = el;
+				blockPos = pos;
+			}
+		}
+		if (!block || !blockPos) return;
+
+		// Strip inline markdown syntax so the source text matches the rendered text
+		const needle = info.text
+			.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+			.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, '')
+			.replace(/[*_~`]/g, '')
+			.replace(/\s+/g, ' ')
+			.trim();
+
+		let range: Range | null = null;
+		if (needle) {
+			const nodes: Text[] = [];
+			let full = '';
+			const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+			while (walker.nextNode()) {
+				nodes.push(walker.currentNode as Text);
+				full += (walker.currentNode as Text).data;
+			}
+
+			const pattern = needle
+				.split(' ')
+				.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+				.join('\\s+');
+			const matches = Array.from(full.matchAll(new RegExp(pattern, 'g')));
+			if (matches.length > 0) {
+				let match = matches[0];
+				if (blockPos[0] === info.startLine) {
+					match = matches[Math.min(info.occurrence, matches.length - 1)];
+				} else {
+					// Multi-line block: pick the match closest to the line's relative position
+					const target = ((info.startLine - blockPos[0]) / Math.max(1, blockPos[1] - blockPos[0])) * full.length;
+					match = matches.reduce((best, m) => (Math.abs(m.index! - target) < Math.abs(best.index! - target) ? m : best));
+				}
+
+				const locate = (offset: number): [Text, number] => {
+					for (const node of nodes) {
+						if (offset <= node.data.length) return [node, offset];
+						offset -= node.data.length;
+					}
+					const last = nodes[nodes.length - 1];
+					return [last, last.data.length];
+				};
+				range = document.createRange();
+				range.setStart(...locate(match.index!));
+				range.setEnd(...locate(match.index! + match[0].length));
+			}
+		}
+
+		const rect = (range ?? block).getBoundingClientRect();
+		const bodyRect = markdownBody.getBoundingClientRect();
+		const targetScroll = markdownBody.scrollTop + rect.top - bodyRect.top - markdownBody.clientHeight / 2 + rect.height / 2;
+		isProgrammaticScroll = true;
+		markdownBody.scrollTop = Math.max(0, targetScroll);
+
+		if (range) {
+			const sel = window.getSelection();
+			sel?.removeAllRanges();
+			sel?.addRange(range);
+		}
+	}
+
 	async function toggleEdit(autoSave = false) {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
 		if (showPreviewSearch) closePreviewSearch();
+
+		// Carry the cursor/selection across the mode switch (not needed in split view)
+		const carriedSelection = isSplit ? null : isEditing ? editorPane?.getSelectionInfo() ?? null : captureViewSelection();
 
 		if (isEditing) {
 			// Switch back to view
@@ -1341,6 +1472,11 @@ import { t } from './utils/i18n.js';
 					console.error('Failed to render markdown for unsaved file', e);
 				}
 			}
+			if (carriedSelection) {
+				// Wait for the rendered HTML (and rich content post-processing) to land in the DOM
+				await tick();
+				setTimeout(() => applyViewSelection(carriedSelection), 50);
+			}
 		} else {
 			// Switch to edit
 			if (tab.path !== '') {
@@ -1354,6 +1490,10 @@ import { t } from './utils/i18n.js';
 				}
 			} else {
 				tab.isEditing = true;
+			}
+			if (carriedSelection && tab.isEditing) {
+				await tick();
+				editorPane?.selectSourceText(carriedSelection.text, carriedSelection.startLine, carriedSelection.endLine, carriedSelection.occurrence);
 			}
 		}
 	}

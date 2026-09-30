@@ -1122,6 +1122,59 @@
 	export const getViewState = () => editor?.saveViewState();
 	export const restoreViewState = (state: any) => editor?.restoreViewState(state);
 	export const revealLine = (line: number) => editor?.revealLineInCenter(line);
+
+	// Current selection (or caret) for carrying it over to the preview on mode switch
+	export function getSelectionInfo(): { text: string; startLine: number; endLine: number; occurrence: number } | null {
+		const model = editor?.getModel();
+		const sel = editor?.getSelection();
+		if (!model || !sel) return null;
+		const text = model.getValueInRange(sel);
+		// Occurrence index of the selected text within its first source line
+		let occurrence = 0;
+		if (text) {
+			const before = model.getLineContent(sel.startLineNumber).slice(0, sel.startColumn - 1);
+			let idx = before.indexOf(text);
+			while (idx !== -1) {
+				occurrence++;
+				idx = before.indexOf(text, idx + 1);
+			}
+		}
+		return { text, startLine: sel.startLineNumber, endLine: sel.endLineNumber, occurrence };
+	}
+
+	// Select text coming from the preview, preferring matches inside the given source line range
+	export function selectSourceText(text: string, startLine: number, endLine: number, occurrence = 0) {
+		const model = editor?.getModel();
+		if (!model) return;
+		const lineCount = model.getLineCount();
+		const from = Math.max(1, Math.min(lineCount, startLine));
+		const to = Math.max(from, Math.min(lineCount, endLine));
+		const blockRange = new monaco.Range(from, 1, to, model.getLineMaxColumn(to));
+
+		let range: monaco.Range | null = null;
+		const trimmed = text.trim();
+		if (trimmed) {
+			const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			// Exact text first, then a pattern tolerating inline markdown syntax and differing whitespace
+			const loose = Array.from(trimmed.replace(/\s+/g, ' '))
+				.map((ch) => (ch === ' ' ? '\\s+' : escape(ch)))
+				.join('[*_~`\\\\]*');
+			for (const [search, isRegex] of [[escape(trimmed), true], [loose, true]] as [string, boolean][]) {
+				const inBlock = model.findMatches(search, blockRange, isRegex, true, null, false);
+				const match = inBlock[Math.min(occurrence, inBlock.length - 1)]
+					?? model.findNextMatch(search, { lineNumber: from, column: 1 }, isRegex, true, null, false);
+				if (match) {
+					range = match.range;
+					break;
+				}
+			}
+		}
+		if (!range) range = new monaco.Range(from, 1, from, 1);
+
+		editor.setSelection(range);
+		editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Immediate);
+		editor.focus();
+	}
 </script>
 
 <div class="editor-outer">
