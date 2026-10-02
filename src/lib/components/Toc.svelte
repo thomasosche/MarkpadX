@@ -31,59 +31,89 @@
 	// when user clicks a toc entry, lock active id until scroll catches up
 	let clickLock: string | null = null;
 	let clickLockTimer: ReturnType<typeof setTimeout> | null = null;
+	// cancels any in-flight scroll-correction loop from a previous click
+	let scrollCorrectionCancel: (() => void) | null = null;
 
-	$effect(() => {
-		if (htmlContent && markdownBody) {
-			const result: TocItem[] = [];
-
-			const hs = markdownBody.querySelectorAll('h1, h2, h3, h4, h5, h6') as NodeListOf<HTMLElement>;
-			for (const h of Array.from(hs)) {
-				let text = h.textContent || '';
-				text = text.replace(/\s*\^[a-zA-Z0-9_-]+$/, '');
-				const anchor = h.querySelector('a.anchor') as HTMLElement | null;
-				const id = h.id || (anchor ? anchor.id : '');
-				if (id) {
-					result.push({ id, text: text.trim(), level: parseInt(h.tagName[1], 10), isBlock: false });
-				}
-			}
-
-			const blockAnchors = markdownBody.querySelectorAll('a[id].block-id-anchor, span[id].block-id-anchor') as NodeListOf<HTMLElement>;
-			for (const el of Array.from(blockAnchors)) {
-				const id = el.id;
-				const label = el.getAttribute('data-label') || id;
-				result.push({ id, text: label, level: 0, isBlock: true });
-			}
-
-			const allIds = new Map<string, number>();
-			const allEls = markdownBody.querySelectorAll('[id]') as NodeListOf<HTMLElement>;
-			let order = 0;
-			for (const el of Array.from(allEls)) {
-				allIds.set(el.id, order++);
-			}
-			result.sort((a, b) => (allIds.get(a.id) ?? 999) - (allIds.get(b.id) ?? 999));
-
-			for (let i = 0; i < result.length; i++) {
-				const item = result[i];
-				if (item.isBlock) continue;
-				item.hasChildren = false;
-				
-				if (i + 1 < result.length) {
-					const next = result[i+1];
-					if (next.isBlock || next.level > item.level) {
-						item.hasChildren = true;
-					}
-				}
-			}
-
-			const currentFingerprint = items.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
-			const newFingerprint = result.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
-			
-			if (currentFingerprint !== newFingerprint) {
-				items = result;
-			}
-		} else {
+	// Rebuilds the TOC by reading the live preview DOM. Guarded by a fingerprint
+	// so redundant mutations (search highlights, re-renders) don't churn state.
+	function buildTocItems() {
+		if (!markdownBody) {
 			if (items.length > 0) items = [];
+			return;
 		}
+
+		const result: TocItem[] = [];
+
+		const hs = markdownBody.querySelectorAll('h1, h2, h3, h4, h5, h6') as NodeListOf<HTMLElement>;
+		for (const h of Array.from(hs)) {
+			let text = h.textContent || '';
+			text = text.replace(/\s*\^[a-zA-Z0-9_-]+$/, '');
+			const anchor = h.querySelector('a.anchor') as HTMLElement | null;
+			const id = h.id || (anchor ? anchor.id : '');
+			if (id) {
+				result.push({ id, text: text.trim(), level: parseInt(h.tagName[1], 10), isBlock: false });
+			}
+		}
+
+		const blockAnchors = markdownBody.querySelectorAll('a[id].block-id-anchor, span[id].block-id-anchor') as NodeListOf<HTMLElement>;
+		for (const el of Array.from(blockAnchors)) {
+			const id = el.id;
+			const label = el.getAttribute('data-label') || id;
+			result.push({ id, text: label, level: 0, isBlock: true });
+		}
+
+		const allIds = new Map<string, number>();
+		const allEls = markdownBody.querySelectorAll('[id]') as NodeListOf<HTMLElement>;
+		let order = 0;
+		for (const el of Array.from(allEls)) {
+			allIds.set(el.id, order++);
+		}
+		result.sort((a, b) => (allIds.get(a.id) ?? 999) - (allIds.get(b.id) ?? 999));
+
+		for (let i = 0; i < result.length; i++) {
+			const item = result[i];
+			if (item.isBlock) continue;
+			item.hasChildren = false;
+
+			if (i + 1 < result.length) {
+				const next = result[i+1];
+				if (next.isBlock || next.level > item.level) {
+					item.hasChildren = true;
+				}
+			}
+		}
+
+		const currentFingerprint = items.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
+		const newFingerprint = result.map(i => `${i.id}-${i.text}-${i.level}`).join('|');
+
+		if (currentFingerprint !== newFingerprint) {
+			items = result;
+		}
+	}
+
+	// Rebuild when the content string or the body element reference changes
+	// (tab switch, edit, reload). Reads htmlContent/markdownBody to track them.
+	$effect(() => {
+		htmlContent;
+		markdownBody;
+		buildTocItems();
+	});
+
+	// The preview DOM is written imperatively (markdownBody.innerHTML = htmlContent)
+	// in a separate effect, and mermaid/KaTeX/highlighting mutate it asynchronously
+	// afterwards — so a one-shot rebuild on htmlContent change can read a stale DOM
+	// (the "need F5 to refresh the TOC" symptom). Observe the DOM directly and
+	// rebuild on any structural change, debounced to one rebuild per frame.
+	$effect(() => {
+		const body = markdownBody;
+		if (!body) return;
+		let raf = 0;
+		const observer = new MutationObserver(() => {
+			if (raf) cancelAnimationFrame(raf);
+			raf = requestAnimationFrame(() => { raf = 0; buildTocItems(); });
+		});
+		observer.observe(body, { childList: true, subtree: true, characterData: true });
+		return () => { observer.disconnect(); if (raf) cancelAnimationFrame(raf); };
 	});
 
 	function checkTruncation(node: HTMLElement) {
@@ -178,6 +208,60 @@
 	import { slide } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 
+	const SCROLL_OFFSET = 60;
+
+	// Computes where markdownBody.scrollTop should be so `el` sits SCROLL_OFFSET
+	// below the top, clamped to the scrollable range.
+	function targetScrollTopFor(el: HTMLElement, container: HTMLElement) {
+		const containerRect = container.getBoundingClientRect();
+		const elRect = el.getBoundingClientRect();
+		const desired = elRect.top - containerRect.top + container.scrollTop - SCROLL_OFFSET;
+		const max = container.scrollHeight - container.clientHeight;
+		return Math.max(0, Math.min(desired, max));
+	}
+
+	// Instantly jumps `el` to the top of `container` and keeps it pinned there for
+	// a few frames. A single jump is unreliable because the preview reflows after
+	// the jump (mermaid, KaTeX, syntax highlighting and images change heights as
+	// they render), so the target drifts and the heading ends up off-screen. We
+	// re-measure each frame and re-pin instantly (no animation) until the position
+	// holds steady, then stop. Returns a cancel fn so a newer click supersedes it.
+	function scrollTargetIntoView(el: HTMLElement, container: HTMLElement, onSettled: () => void) {
+		let cancelled = false;
+		let rounds = 0;
+		let stableFrames = 0;
+		const maxRounds = 30; // ~0.5s cap — enough for async renders to settle
+
+		const pin = () => {
+			const target = targetScrollTopFor(el, container);
+			if (Math.abs(target - container.scrollTop) > 1) container.scrollTop = target;
+			return target;
+		};
+
+		pin();
+
+		const tick = () => {
+			if (cancelled) return;
+			rounds++;
+
+			const target = pin();
+			const onTarget = Math.abs(target - container.scrollTop) <= 1;
+			stableFrames = onTarget ? stableFrames + 1 : 0;
+
+			// Held steady on target, or safety cap reached: done.
+			if (stableFrames >= 3 || rounds >= maxRounds) {
+				container.scrollTop = target;
+				onSettled();
+				return;
+			}
+
+			requestAnimationFrame(tick);
+		};
+		requestAnimationFrame(tick);
+
+		return () => { cancelled = true; };
+	}
+
 	function jumpTo(id: string) {
 		const el = markdownBody?.querySelector(`[id="${CSS.escape(id)}"]`) as HTMLElement | null;
 		if (el && markdownBody) {
@@ -186,7 +270,7 @@
 			clickLock = id;
 			activeId = id;
 			scrollTocIntoView();
-			
+
 			const item = items.find(i => i.id === id);
 			if (item) onjump?.(id, item.text);
 
@@ -195,14 +279,15 @@
 			el.classList.add('toc-target-active');
 			activeTargetEl = el;
 
-			const containerRect = markdownBody.getBoundingClientRect();
-			const elRect = el.getBoundingClientRect();
-			const targetScrollTop = elRect.top - containerRect.top + markdownBody.scrollTop - 60;
-			markdownBody.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
-
-			// release lock after scroll settles
+			// supersede any correction loop still running from a previous click
+			scrollCorrectionCancel?.();
 			if (clickLockTimer) clearTimeout(clickLockTimer);
-			clickLockTimer = setTimeout(() => { clickLock = null; }, 600);
+
+			scrollCorrectionCancel = scrollTargetIntoView(el, markdownBody, () => {
+				scrollCorrectionCancel = null;
+				// brief grace period so the scroll handler doesn't yank activeId back
+				clickLockTimer = setTimeout(() => { clickLock = null; }, 150);
+			});
 		}
 	}
 </script>

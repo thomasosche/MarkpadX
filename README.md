@@ -39,6 +39,11 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - Works inside table cells and inline formatting — markdown syntax (`*`, `_`, `` ` ``, `~`, `|` …) and whitespace differences are ignored when matching
 - Not active in split view (both panes are already visible)
 
+### Navigation Pane (Table of Contents)
+- Clicking a heading reliably jumps to it on the **first click** — the view jumps instantly to the target and highlights it, then re-pins if the content reflows while rendering (mermaid, KaTeX, syntax highlighting and images change heights after load)
+- Rapid clicks don't fight each other — a newer click supersedes any in-flight jump
+- The pane refreshes **automatically** as the document renders — no need to press `F5` to see an up-to-date outline (watches the rendered DOM directly instead of only the raw content)
+
 ### Keyboard Shortcuts Dialog
 - Press `?` (or `Shift+/`) in preview mode to open a grouped reference of every keyboard shortcut (File / View / Find / Zoom / Tabs)
 - OS-aware: shows `⌘` on macOS, `Ctrl` on Windows / Linux
