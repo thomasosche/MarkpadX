@@ -20,6 +20,7 @@
 			rows: [
 				{ keys: `${cmd}+T`, desc: 'Open Home / Recents tab' },
 				{ keys: `${cmd}+W`, desc: 'Close current file / tab' },
+				{ keys: `${cmd}+Shift+W`, desc: 'Close all other tabs' },
 				{ keys: `${cmd}+Shift+T`, desc: 'Undo close tab' },
 				{ keys: `${cmd}+S`, desc: 'Save (in editor or split mode)' },
 				{ keys: `${cmd}+Q`, desc: 'Quit window' },

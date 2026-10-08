@@ -92,28 +92,17 @@
 	}
 
 	// Rebuild when the content string or the body element reference changes
-	// (tab switch, edit, reload). Reads htmlContent/markdownBody to track them.
+	// (tab switch, edit, reload). The preview DOM is written imperatively
+	// (markdownBody.innerHTML = htmlContent) in a separate effect, so defer the
+	// rebuild one frame to read the new DOM rather than the stale one.
 	$effect(() => {
 		htmlContent;
-		markdownBody;
-		buildTocItems();
-	});
-
-	// The preview DOM is written imperatively (markdownBody.innerHTML = htmlContent)
-	// in a separate effect, and mermaid/KaTeX/highlighting mutate it asynchronously
-	// afterwards — so a one-shot rebuild on htmlContent change can read a stale DOM
-	// (the "need F5 to refresh the TOC" symptom). Observe the DOM directly and
-	// rebuild on any structural change, debounced to one rebuild per frame.
-	$effect(() => {
-		const body = markdownBody;
-		if (!body) return;
-		let raf = 0;
-		const observer = new MutationObserver(() => {
-			if (raf) cancelAnimationFrame(raf);
-			raf = requestAnimationFrame(() => { raf = 0; buildTocItems(); });
-		});
-		observer.observe(body, { childList: true, subtree: true, characterData: true });
-		return () => { observer.disconnect(); if (raf) cancelAnimationFrame(raf); };
+		if (!markdownBody) {
+			buildTocItems();
+			return;
+		}
+		const raf = requestAnimationFrame(buildTocItems);
+		return () => cancelAnimationFrame(raf);
 	});
 
 	function checkTruncation(node: HTMLElement) {

@@ -204,9 +204,10 @@
 		let scrolled = false;
 		if (tabManager.activeTab) {
 			if (tabManager.activeTab.anchorLine > 0) {
+				// Immediate: a smooth animation would override the selection carried over from the preview
 				editor.revealLineNearTop(
 					Math.max(1, tabManager.activeTab.anchorLine - 2),
-					monaco.editor.ScrollType.Smooth,
+					monaco.editor.ScrollType.Immediate,
 				);
 				scrolled = true;
 			}
@@ -1130,6 +1131,9 @@
 		const sel = editor?.getSelection();
 		if (!model || !sel) return null;
 		const lineText = model.getLineContent(sel.startLineNumber);
+		// Only keep the on-screen height when the selection is actually visible
+		const visible = editor.getScrolledVisiblePosition(sel.getStartPosition());
+		const height = editor.getLayoutInfo().height;
 		return {
 			text: model.getValueInRange(sel),
 			startLine: sel.startLineNumber,
@@ -1137,6 +1141,7 @@
 			startColumn: indexToByteCol(lineText, sel.startColumn - 1),
 			lineText,
 			occurrence: 0,
+			viewportOffset: visible && visible.top >= 0 && visible.top < height ? visible.top : undefined,
 		};
 	}
 
@@ -1172,7 +1177,12 @@
 		if (!range) range = new monaco.Range(from, fromCol, from, fromCol);
 
 		editor.setSelection(range);
-		editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Immediate);
+		if (info.viewportOffset !== undefined) {
+			const offset = Math.max(0, Math.min(info.viewportOffset, editor.getLayoutInfo().height - 40));
+			editor.setScrollTop(editor.getTopForLineNumber(range.startLineNumber) - offset, monaco.editor.ScrollType.Immediate);
+		} else {
+			editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Immediate);
+		}
 		editor.focus();
 	}
 </script>

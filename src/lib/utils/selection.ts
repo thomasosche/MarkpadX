@@ -11,6 +11,8 @@ export type SourceSelection = {
 	lineText?: string;
 	/** Index of the selected text among its matches inside the source block (preview → editor only) */
 	occurrence: number;
+	/** Distance in px from the top of the source pane to the selection, to put it at the same height after the switch */
+	viewportOffset?: number;
 };
 
 export type Sourcepos = { startLine: number; startCol: number; endLine: number; endCol: number };

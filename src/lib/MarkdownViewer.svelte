@@ -213,8 +213,18 @@ import { t } from './utils/i18n.js';
 	let previewSearchHighlights: HTMLElement[] = [];
 
 	async function openPreviewSearch() {
+		// Ctrl+F again while the bar is open: reset the old search and start fresh
+		if (showPreviewSearch) {
+			previewSearchQuery = '';
+			clearPreviewSearchHighlights();
+			previewSearchMatches = [];
+			previewSearchCurrentIndex = -1;
+			await tick();
+			previewSearchInputEl?.focus();
+			return;
+		}
 		// Refresh content from disk before searching to ensure we search the latest version
-		if (currentFile) await loadMarkdown(currentFile);
+		if (currentFile) await reloadCurrentFile();
 		showPreviewSearch = true;
 		await tick();
 		previewSearchInputEl?.focus();
@@ -1315,10 +1325,35 @@ import { t } from './utils/i18n.js';
 
 	// Map the preview's text selection to its source block so the editor can select the same text
 	function captureViewSelection(): SourceSelection | null {
+		if (!markdownBody) return null;
+		return captureVisibleSelection(markdownBody) ?? captureTopRow(markdownBody);
+	}
+
+	// No (visible) selection: carry the row at the top of the preview so the editor opens on what was being read
+	function captureTopRow(body: HTMLElement): SourceSelection | null {
+		const anchor = capturePreviewAnchor(body);
+		if (!anchor.sourcepos) return null;
+		const [start, end = start] = anchor.sourcepos.split('-');
+		const startLine = parseInt(start, 10);
+		const endLine = parseInt(end, 10) || startLine;
+		const same = body.querySelectorAll<HTMLElement>(`[data-sourcepos="${CSS.escape(anchor.sourcepos)}"]`);
+		const el = same[anchor.index] ?? same[0];
+		const height = el?.getBoundingClientRect().height || 1;
+		const line = startLine + Math.round((endLine - startLine) * Math.min(1, Math.max(0, anchor.delta / height)));
+		return { text: '', startLine: line, endLine: line, startColumn: 1, occurrence: 0, viewportOffset: PREVIEW_ANCHOR_OFFSET };
+	}
+
+	function captureVisibleSelection(markdownBody: HTMLElement): SourceSelection | null {
 		const sel = window.getSelection();
-		if (!markdownBody || !sel || sel.rangeCount === 0) return null;
+		if (!sel || sel.rangeCount === 0) return null;
 		const range = sel.getRangeAt(0);
 		if (!markdownBody.contains(range.startContainer)) return null;
+
+		// A selection scrolled out of view is stale: the reader is looking at something else
+		const bodyRect = markdownBody.getBoundingClientRect();
+		const rects = range.getClientRects();
+		const selRect = rects.length > 0 ? rects[0] : range.getBoundingClientRect();
+		if (selRect.bottom < bodyRect.top || selRect.top > bodyRect.bottom) return null;
 
 		const blockOf = (node: Node) => {
 			const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
@@ -1342,6 +1377,7 @@ import { t } from './utils/i18n.js';
 			endLine: Math.max(startPos.endLine, endPos.endLine),
 			startColumn: startPos.startCol,
 			occurrence: findAll(normalize(before.toString()), normalize(text)).length,
+			viewportOffset: selRect.top - bodyRect.top,
 		};
 	}
 
@@ -1390,24 +1426,37 @@ import { t } from './utils/i18n.js';
 		return range;
 	}
 
-	// Select the editor's selected text in the rendered preview and scroll it into view
+	// Marks the editor's caret row in the preview without touching the real selection
+	// (CSS Custom Highlight API). Cleared on the next click or key press in the preview.
+	function setRowHighlight(range: Range | null) {
+		const registry = (CSS as any).highlights;
+		const HighlightCtor = (window as any).Highlight;
+		if (!registry || !HighlightCtor) return;
+		if (range) registry.set('mode-switch-row', new HighlightCtor(range));
+		else registry.delete('mode-switch-row');
+	}
+
+	// Select the editor's selected text in the rendered preview (or mark the caret row) and scroll it
+	// to the height it had in the editor
 	function applyViewSelection(info: SourceSelection) {
 		if (!markdownBody) return;
 
-		// Elements on the selection's line, innermost first; those also containing its column
+		// Visible elements on the selection's line, innermost first; those also containing its column
 		// come first (table cells, inline elements), with line-only matches as fallback
-		const onLine = Array.from(markdownBody.querySelectorAll<HTMLElement>('[data-sourcepos]'))
+		const all = Array.from(markdownBody.querySelectorAll<HTMLElement>('[data-sourcepos]')).filter(
+			(el) => el.getClientRects().length > 0,
+		);
+		const onLine = all
 			.filter((el) => {
 				const pos = parseSourcepos(el);
 				return pos && sourceposContains(pos, info.startLine);
 			})
 			.reverse();
-		if (onLine.length === 0) return;
 		const atPoint = onLine.filter((el) => sourceposContains(parseSourcepos(el)!, info.startLine, info.startColumn));
 		const candidates = [...atPoint, ...onLine.filter((el) => !atPoint.includes(el))];
 
-		const needle = normalize(sourceToPlain(info.text));
 		let range: Range | null = null;
+		const needle = normalize(sourceToPlain(info.text));
 		if (needle) {
 			for (const el of candidates) {
 				range = findInElement(el, needle, info);
@@ -1415,23 +1464,299 @@ import { t } from './utils/i18n.js';
 			}
 		}
 
-		const rect = (range ?? candidates[0]).getBoundingClientRect();
+		// Plain caret: locate the caret's whole row so it can be marked and positioned exactly
+		let rowRange: Range | null = null;
+		if (!range && info.lineText !== undefined) {
+			const rowNeedle = normalize(sourceToPlain(info.lineText));
+			if (rowNeedle) {
+				for (const el of candidates) {
+					rowRange = findInElement(el, rowNeedle, { ...info, startColumn: 1 });
+					if (rowRange) break;
+				}
+			}
+		}
+
+		// y of the target row relative to the top of the preview
 		const bodyRect = markdownBody.getBoundingClientRect();
-		const targetScroll = markdownBody.scrollTop + rect.top - bodyRect.top - markdownBody.clientHeight / 2 + rect.height / 2;
-		isProgrammaticScroll = true;
-		markdownBody.scrollTop = Math.max(0, targetScroll);
+		let y: number | null = null;
+		let height = 0;
+		const target = range ?? rowRange;
+		if (target) {
+			const rects = target.getClientRects();
+			const rect = rects.length > 0 ? rects[0] : target.getBoundingClientRect();
+			y = rect.top - bodyRect.top;
+			height = rect.height;
+		} else {
+			// No text match (blank or syntax-only line): interpolate inside the innermost element on the
+			// line, or fall back to the closest element above it
+			let el: HTMLElement | undefined = candidates[0];
+			if (!el) {
+				let bestLine = -1;
+				for (const e of all) {
+					const pos = parseSourcepos(e)!;
+					if (pos.startLine <= info.startLine && pos.startLine >= bestLine) {
+						el = e;
+						bestLine = pos.startLine;
+					}
+				}
+			}
+			if (el) {
+				const pos = parseSourcepos(el)!;
+				const rect = el.getBoundingClientRect();
+				const ratio = pos.endLine > pos.startLine
+					? Math.min(1, Math.max(0, (info.startLine - pos.startLine) / (pos.endLine - pos.startLine + 1)))
+					: 0;
+				y = rect.top - bodyRect.top + rect.height * ratio;
+			}
+		}
+
+		if (y !== null) {
+			const offset = info.viewportOffset !== undefined
+				? Math.max(0, Math.min(info.viewportOffset, markdownBody.clientHeight - 40))
+				: markdownBody.clientHeight / 2 - height / 2;
+			const maxScroll = markdownBody.scrollHeight - markdownBody.clientHeight;
+			const targetScroll = Math.max(0, Math.min(maxScroll, markdownBody.scrollTop + y - offset));
+			if (Math.abs(markdownBody.scrollTop - targetScroll) > 1) {
+				isProgrammaticScroll = true;
+				markdownBody.scrollTop = targetScroll;
+			}
+		}
 
 		if (range) {
 			const sel = window.getSelection();
 			sel?.removeAllRanges();
 			sel?.addRange(range);
 		}
+		setRowHighlight(range ? null : rowRange);
+	}
+
+	// Apply the carried selection, then keep re-applying it while the preview settles. The page is
+	// re-rendered after the mode switch (full-document load for large files, mermaid/KaTeX/highlight.js,
+	// TOC/split re-render), which replaces DOM nodes (dropping the selection) and shifts the layout.
+	// Stops on user interaction or after a timeout.
+	function applyViewSelectionSettled(info: SourceSelection) {
+		const body = markdownBody;
+		if (!body) return;
+
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const reapply = () => {
+			clearTimeout(timer);
+			timer = setTimeout(() => applyViewSelection(info), 40);
+		};
+		const mutations = new MutationObserver(reapply);
+		mutations.observe(body, { childList: true, subtree: true, characterData: true });
+		const resizes = new ResizeObserver(reapply);
+		resizes.observe(body);
+
+		const stop = () => {
+			mutations.disconnect();
+			resizes.disconnect();
+			clearTimeout(timer);
+			clearTimeout(deadline);
+			body.removeEventListener('wheel', stop);
+			body.removeEventListener('mousedown', stop);
+			body.removeEventListener('keydown', stop);
+		};
+		const deadline = setTimeout(stop, 5000);
+		body.addEventListener('wheel', stop, { passive: true });
+		body.addEventListener('mousedown', stop);
+		body.addEventListener('keydown', stop);
+
+		const clearRow = () => {
+			setRowHighlight(null);
+			body.removeEventListener('mousedown', clearRow);
+			body.removeEventListener('keydown', clearRow);
+		};
+		body.addEventListener('mousedown', clearRow);
+		body.addEventListener('keydown', clearRow);
+
+		applyViewSelection(info);
+	}
+
+	let cancelReloadPin: (() => void) | null = null;
+
+	interface PreviewAnchor {
+		sourcepos: string;
+		index: number;
+		line: number;
+		delta: number;
+		scrollTop: number;
+	}
+
+	const PREVIEW_ANCHOR_OFFSET = 60;
+
+	function topInPreview(el: HTMLElement, body: HTMLElement) {
+		return el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+	}
+
+	// Captures the source element at the top of the preview: the deepest visible [data-sourcepos]
+	// element starting at or above the anchor offset, plus the pixel distance into it. The tab's
+	// anchorLine is not precise enough here: it only looks at top-level children, and fold wrappers
+	// (no sourcepos) hold most of the content, so it lags behind at the last passed heading.
+	function capturePreviewAnchor(body: HTMLElement): PreviewAnchor {
+		const y = body.scrollTop + PREVIEW_ANCHOR_OFFSET;
+		let best: HTMLElement | null = null;
+		let bestTop = -Infinity;
+		for (const el of Array.from(body.querySelectorAll<HTMLElement>('[data-sourcepos]'))) {
+			if (el.getClientRects().length === 0) continue; // hidden, e.g. inside a collapsed section
+			const top = topInPreview(el, body);
+			if (top <= y && top >= bestTop) {
+				best = el;
+				bestTop = top;
+			}
+		}
+		if (!best) return { sourcepos: '', index: 0, line: 0, delta: 0, scrollTop: body.scrollTop };
+
+		const sourcepos = best.dataset.sourcepos || '';
+		const same = Array.from(body.querySelectorAll(`[data-sourcepos="${CSS.escape(sourcepos)}"]`));
+		return {
+			sourcepos,
+			index: Math.max(0, same.indexOf(best)),
+			line: parseInt(sourcepos, 10) || 0,
+			delta: y - bestTop,
+			scrollTop: body.scrollTop
+		};
+	}
+
+	// Scrolls the captured element back to the same spot. Falls back to the source line when the
+	// element no longer exists (lines shifted by an external edit), then to the raw scrollTop.
+	function restorePreviewAnchor(body: HTMLElement, anchor: PreviewAnchor) {
+		const same = anchor.sourcepos
+			? body.querySelectorAll<HTMLElement>(`[data-sourcepos="${CSS.escape(anchor.sourcepos)}"]`)
+			: [];
+		const el = same[anchor.index] ?? same[0];
+		let target: number;
+		if (el && el.getClientRects().length > 0) {
+			target = topInPreview(el, body) + anchor.delta - PREVIEW_ANCHOR_OFFSET;
+		} else if (anchor.line > 0) {
+			scrollToLine(anchor.line, body.clientHeight > 0 ? Math.min(1, PREVIEW_ANCHOR_OFFSET / body.clientHeight) : 0);
+			return;
+		} else {
+			target = anchor.scrollTop;
+		}
+		target = Math.max(0, Math.min(target, body.scrollHeight - body.clientHeight));
+		if (Math.abs(body.scrollTop - target) > 1) {
+			isProgrammaticScroll = true;
+			body.scrollTop = target;
+		}
+	}
+
+	// Keep the reader's position pinned while a reloaded preview settles. Swapping innerHTML and the
+	// async mermaid/KaTeX/highlight.js passes change the document height, which clamps scrollTop and
+	// leaves the view somewhere else. Stops on user interaction or after a timeout.
+	function pinPreviewPositionSettled(anchor: PreviewAnchor) {
+		const body = markdownBody;
+		if (!body) return;
+		cancelReloadPin?.();
+
+		const apply = () => restorePreviewAnchor(body, anchor);
+
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const reapply = () => {
+			clearTimeout(timer);
+			timer = setTimeout(apply, 40);
+		};
+		const mutations = new MutationObserver(reapply);
+		mutations.observe(body, { childList: true, subtree: true, characterData: true });
+		const resizes = new ResizeObserver(reapply);
+		resizes.observe(body);
+
+		const stop = () => {
+			mutations.disconnect();
+			resizes.disconnect();
+			clearTimeout(timer);
+			clearTimeout(deadline);
+			body.removeEventListener('wheel', stop);
+			body.removeEventListener('mousedown', stop);
+			body.removeEventListener('keydown', stop);
+			if (cancelReloadPin === stop) cancelReloadPin = null;
+		};
+		const deadline = setTimeout(stop, 3000);
+		body.addEventListener('wheel', stop, { passive: true });
+		body.addEventListener('mousedown', stop);
+		body.addEventListener('keydown', stop);
+		cancelReloadPin = stop;
+
+		apply();
+	}
+
+	// In-place reload of the open file (live-mode file change, F5/Ctrl+R, search refresh). In view
+	// mode this loads the full document directly (loadMarkdown first renders a truncated 50 KB
+	// preview, which shrinks the page and clamps scrollTop) and pins the previous position until
+	// rendering settles.
+	// Incremented per reload so a slower, older read (e.g. one that hit the file mid-write) can't
+	// overwrite the result of a newer one.
+	let reloadSeq = 0;
+
+	async function reloadCurrentFile(force = false) {
+		const tab = tabManager.activeTab;
+		if (!tab || !tab.path) return;
+		if (tab.isEditing || !markdownBody) {
+			await loadMarkdown(tab.path);
+			return;
+		}
+
+		const seq = ++reloadSeq;
+		const id = tab.id;
+		const path = tab.path;
+		const anchor = capturePreviewAnchor(markdownBody);
+
+		try {
+			const [html, content] = await Promise.all([
+				invoke('open_markdown', { path }) as Promise<string>,
+				invoke('read_file_content', { path }) as Promise<string>
+			]);
+			if (seq !== reloadSeq || tabManager.activeTabId !== id || tab.path !== path) return;
+			if (!force && tab.content && content === tab.rawContent) return;
+			tabManager.updateTabContent(id, processMarkdownHtml(html, path, collapsedHeaders));
+			tabManager.setTabRawContent(id, content);
+			await tick();
+			pinPreviewPositionSettled(anchor);
+		} catch (e) {
+			console.error('Error reloading file:', e);
+		} finally {
+			// Re-arm the watcher like loadMarkdown does: editors that save via temp file + rename
+			// replace the file, which can drop the watch on the original path.
+			if (seq === reloadSeq && liveMode) invoke('watch_file', { path }).catch(console.error);
+		}
+	}
+
+	// Keep the single, app-wide file watcher on the active tab's file. Tab switches and restored
+	// sessions don't go through loadMarkdown, so the watcher stayed on the previously loaded file
+	// (or was never started) and live reload only began after F5. When the watcher moves to a file,
+	// pick up changes made while it wasn't watched; reloadCurrentFile skips unchanged content.
+	let watchedPath = '';
+	$effect(() => {
+		const path = currentFile;
+		const live = liveMode;
+		untrack(() => {
+			if (!live || !path) {
+				if (watchedPath) invoke('unwatch_file').catch(console.error);
+				watchedPath = '';
+				return;
+			}
+			if (path === watchedPath) return;
+			watchedPath = path;
+			invoke('watch_file', { path }).catch(console.error);
+			const tab = tabManager.activeTab;
+			if (tab && !tab.isEditing && !tab.isDirty) reloadCurrentFile();
+		});
+	});
+
+	// One save fires several watcher events; coalesce them into a single reload.
+	let fileChangedTimer: ReturnType<typeof setTimeout> | undefined;
+	function scheduleLiveReload() {
+		clearTimeout(fileChangedTimer);
+		fileChangedTimer = setTimeout(() => {
+			if (liveMode && currentFile) reloadCurrentFile();
+		}, 150);
 	}
 
 	async function toggleEdit(autoSave = false) {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
 		if (showPreviewSearch) closePreviewSearch();
+		setRowHighlight(null);
 
 		// Carry the cursor/selection across the mode switch (not needed in split view)
 		const carriedSelection = isSplit ? null : isEditing ? editorPane?.getSelectionInfo() ?? null : captureViewSelection();
@@ -1461,7 +1786,21 @@ import { t } from './utils/i18n.js';
 			tab.isEditing = false;
 			if (tab.path !== '') {
 				tab.isDirty = false;
-				await loadMarkdown(tab.path, { preserveEditState: true });
+				// Render the full document in one pass: loadMarkdown first shows a truncated 50 KB preview
+				// and swaps in the rest later, which reflows the page under the carried selection
+				try {
+					const path = tab.path;
+					const [html, content] = await Promise.all([
+						invoke('open_markdown', { path }) as Promise<string>,
+						invoke('read_file_content', { path }) as Promise<string>
+					]);
+					tabManager.updateTabContent(tab.id, processMarkdownHtml(html, path, collapsedHeaders));
+					tabManager.setTabRawContent(tab.id, content);
+					if (liveMode) invoke('watch_file', { path }).catch(console.error);
+				} catch (e) {
+					console.error('Failed to render document for view mode', e);
+					await loadMarkdown(tab.path, { preserveEditState: true });
+				}
 			} else {
 				try {
 					const html = (await invoke('render_markdown', { content: tab.rawContent })) as string;
@@ -1474,7 +1813,7 @@ import { t } from './utils/i18n.js';
 			if (carriedSelection) {
 				// Wait for the rendered HTML (and rich content post-processing) to land in the DOM
 				await tick();
-				setTimeout(() => applyViewSelection(carriedSelection), 50);
+				setTimeout(() => applyViewSelectionSettled(carriedSelection), 50);
 			}
 		} else {
 			// Switch to edit
@@ -1628,7 +1967,7 @@ import { t } from './utils/i18n.js';
 		localStorage.setItem('liveMode', String(liveMode));
 		if (liveMode && currentFile) {
 			await invoke('watch_file', { path: currentFile });
-			if (tabManager.activeTabId) await loadMarkdown(currentFile);
+			if (tabManager.activeTabId) await reloadCurrentFile();
 		} else {
 			await invoke('unwatch_file');
 		}
@@ -1996,9 +2335,19 @@ import { t } from './utils/i18n.js';
 
 		const isSplit = tabManager.activeTab?.isSplit;
 
-		if (cmdOrCtrl && key === 'w') {
+		if (cmdOrCtrl && !e.shiftKey && key === 'w') {
 			e.preventDefault();
 			closeFile();
+		}
+		if (cmdOrCtrl && e.shiftKey && key === 'w') {
+			e.preventDefault();
+			const activeId = tabManager.activeTabId;
+			if (activeId) {
+				tabManager.tabs
+					.filter((t) => t.id !== activeId)
+					.map((t) => t.id)
+					.forEach((id) => tabManager.closeTab(id));
+			}
 		}
 		if (cmdOrCtrl && !e.shiftKey && key === 't') {
 			e.preventDefault();
@@ -2030,7 +2379,7 @@ import { t } from './utils/i18n.js';
 		}
 		if ((cmdOrCtrl && key === 'r' && !isEditing) || (code === 'F5' && !isEditing)) {
 			e.preventDefault();
-			if (currentFile) loadMarkdown(currentFile);
+			if (currentFile) reloadCurrentFile(true);
 		}
 		if (cmdOrCtrl && key === 'e') {
 			e.preventDefault();
@@ -2295,7 +2644,7 @@ import { t } from './utils/i18n.js';
 			);
 			unlisteners.push(
 				await listen('file-changed', () => {
-					if (liveMode && currentFile) loadMarkdown(currentFile);
+					scheduleLiveReload();
 				}),
 			);
 
@@ -2870,6 +3219,10 @@ import { t } from './utils/i18n.js';
 <ContextMenu {...docContextMenu} onhide={() => (docContextMenu.show = false)} />
 
 <style>
+	:global(::highlight(mode-switch-row)) {
+		background-color: rgba(255, 196, 0, 0.3);
+	}
+
 	:root {
 		--animation: cubic-bezier(0.05, 0.95, 0.05, 0.95);
 		scroll-behavior: smooth !important;
@@ -3590,15 +3943,15 @@ import { t } from './utils/i18n.js';
 		border-radius: 4px;
 	}
 
-	:global(.preview-search-highlight) {
+	:global(.markdown-body mark.preview-search-highlight) {
 		background-color: rgba(255, 200, 0, 0.35);
-		border-radius: 2px;
-		padding: 0 1px;
+		border-radius: 0;
+		padding: 0;
 	}
 
-	:global(.preview-search-highlight.preview-search-active) {
+	:global(.markdown-body mark.preview-search-highlight.preview-search-active) {
 		background-color: rgba(255, 165, 0, 0.7);
 		outline: 2px solid rgba(255, 165, 0, 0.9);
-		border-radius: 2px;
+		border-radius: 0;
 	}
 </style>
