@@ -121,16 +121,29 @@ try {
 			await sleep(1500);
 			await placeInPreview(m3(TARGET), RATIO);
 			await sleep(300);
-			const refBefore = await ratioIn(article, c.ref, '__t.view()');
+			let ref = c.ref;
+			let refBefore = await ratioIn(article, ref, '__t.view()');
+			const isDeletion = c.name.startsWith('delete');
+			// an off-screen reference says nothing when nothing in view was deleted: then the paragraph
+			// at the reload anchor line (60 preview px below the top, as capturePreviewAnchor uses) is
+			// the one that must stay put
+			if ((refBefore === null || refBefore < 0) && !isDeletion) {
+				const v0 = await evaluate(`__t.view()`);
+				const firstVisible = await evaluate(`__t.markerAt(${v0.top + 60 * scale + 1})`);
+				if (firstVisible?.marker?.startsWith('r')) {
+					ref = firstVisible.marker;
+					refBefore = await ratioIn(article, ref, '__t.view()');
+				}
+			}
 			const tocBefore = await evaluate(`__t.toc()`);
 			write(c.change(baseBlocks()));
 			await sleep(1800);
-			const refAfter = await ratioIn(article, c.ref, '__t.view()');
+			const refAfter = await ratioIn(article, ref, '__t.view()');
 			// a reference line that was scrolled off above the view moves to the top offset when the
 			// lines below it (the anchor) were deleted; a visible one must stay where it was
 			const vh = (await evaluate(`__t.view()`)).h;
 			const expected = refBefore !== null && refBefore >= 0 ? refBefore : Math.round(((60 * scale) / vh) * 100) / 100;
-			check({ zoom, mode: 'view', change: c.name, ref: c.ref, before: refBefore, expected, after: refAfter }, { position: near(expected, refAfter, refBefore !== null && refBefore >= 0 ? TOL : 0.05), toc: tocOk(c.toc, tocBefore, await evaluate(`__t.toc()`)) });
+			check({ zoom, mode: 'view', change: c.name, ref, before: refBefore, expected, after: refAfter }, { position: near(expected, refAfter, refBefore !== null && refBefore >= 0 ? TOL : 0.05), toc: tocOk(c.toc, tocBefore, await evaluate(`__t.toc()`)) });
 		}
 
 		// view mode: the paragraphs at the very top of the view are deleted -> the line above lands at the top

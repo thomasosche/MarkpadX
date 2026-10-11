@@ -364,7 +364,7 @@ One source of zoom per mode: edit mode → font size = base × zoom, also at cre
 
 ## I-08 · Run the ported E2E suites once in the repo
 
-- **Status:** planned
+- **Status:** done (2026-10-11) — carry 68/68 (glow 1.3–1.4 s), reload 42/42, no page errors. One reload check was a test gap, fixed in `tests/e2e/reload.mjs`: with an off-screen reference and nothing deleted, the paragraph at the reload anchor line (60 preview px below the top) is checked instead.
 - **Added:** 2026-10-11
 
 **What**
