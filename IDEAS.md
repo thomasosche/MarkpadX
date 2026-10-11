@@ -96,7 +96,7 @@ With many open files the strip truncates titles and needs scroll arrows; a verti
 **Work list after the rebase**
 
 *P1 · Build, deploy and supply chain (fork-only, no upstream equivalent)*
-- [ ] `build.ps1` (debug, kills running Markpad instances first), `release.ps1`, exe-only release flow (`npm run build` + `npx tauri build --no-bundle`); deploy to `~\.local\bin\Markpad.exe` with `.bak` backup.
+- [ ] `build.ps1` (debug, kills running Markpad instances first), `release.ps1`, exe-only release flow (`npm run build` + `npx tauri build --no-bundle`); deploy by replacing the locally installed exe (keep a `.bak` of the previous one).
 - [ ] `sbom-upload.ps1` (DependencyTrack) — re-point at upstream's lockfile layout; keep upstream's CI `npm audit` (#308, #314) as well.
 - [ ] `install-local.bat`, `.gitignore` entries, `opener:allow-open-path` capability scope — check whether upstream's `localFileLinks.ts` + #869 make the custom scope unnecessary.
 
