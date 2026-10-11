@@ -701,7 +701,7 @@ import { t } from './utils/i18n.js';
 				tabManager.setTabRawContent(activeId, content);
 			}
 
-			if (liveMode) invoke('watch_file', { path: filePath }).catch(console.error);
+			if (liveMode) armWatcher(filePath);
 
 			await tick();
 			if (filePath) saveRecentFile(filePath);
@@ -1743,12 +1743,8 @@ import { t } from './utils/i18n.js';
 			return;
 		}
 
-		// view mode can hold unsaved changes (task checkbox toggles): never overwrite them silently
-		if (tab.isDirty) {
-			if (!force) {
-				addToast(t('toast.fileChangedUnsavedKept', settings.language), 'warning');
-				return;
-			}
+		// view mode can hold unsaved changes (task checkbox toggles): F5 / Ctrl+R asks before discarding
+		if (tab.isDirty && force) {
 			const response = await askCustom(t('toast.reloadDiscardsChanges', settings.language), {
 				title: t('modal.unsavedChanges', settings.language),
 				kind: 'warning',
@@ -1762,14 +1758,20 @@ import { t } from './utils/i18n.js';
 		const id = tab.id;
 		const path = tab.path;
 		const anchor = capturePreviewAnchor(markdownBody);
+		const isCurrent = () => seq === reloadSeq && tabManager.activeTabId === id && tab.path === path;
 
 		try {
-			const [html, content] = await Promise.all([
-				invoke('open_markdown', { path }) as Promise<string>,
-				invoke('read_file_content', { path }) as Promise<string>
-			]);
-			if (seq !== reloadSeq || tabManager.activeTabId !== id || tab.path !== path) return;
+			// one read: the rendered HTML and the raw text always come from the same file version
+			const content = (await invoke('read_file_content', { path })) as string;
+			if (!isCurrent()) return;
+			if (tab.isDirty && !force) {
+				// keep unsaved toggles; only tell the user when the file really changed on disk
+				if (content !== tab.originalContent) addToast(t('toast.fileChangedUnsavedKept', settings.language), 'warning');
+				return;
+			}
 			if (!force && tab.content && content === tab.rawContent) return;
+			const html = (await invoke('render_markdown', { content })) as string;
+			if (!isCurrent()) return;
 			tabManager.updateTabContent(id, processMarkdownHtml(html, path, collapsedHeaders));
 			tabManager.setTabRawContent(id, content);
 			await tick();
@@ -1778,8 +1780,9 @@ import { t } from './utils/i18n.js';
 			console.error('Error reloading file:', e);
 		} finally {
 			// Re-arm the watcher like loadMarkdown does: editors that save via temp file + rename
-			// replace the file, which can drop the watch on the original path.
-			if (seq === reloadSeq && liveMode) invoke('watch_file', { path }).catch(console.error);
+			// replace the file, which can drop the watch on the original path. Only while this file is
+			// still the active one, otherwise the watcher would be pulled away from the new tab's file.
+			if (seq === reloadSeq && liveMode && tabManager.activeTab?.path === path) armWatcher(path);
 		}
 	}
 
@@ -1788,6 +1791,25 @@ import { t } from './utils/i18n.js';
 	// (or was never started) and live reload only began after F5. When the watcher moves to a file,
 	// pick up changes made while it wasn't watched; reloadCurrentFile skips unchanged content.
 	let watchedPath = '';
+
+	// Point the watcher at a file. Watching fails while the file is briefly missing (save via temp
+	// file + rename), so retry a few times; if it never succeeds, drop the claim so the next tab
+	// switch or reload tries again instead of assuming the file is watched.
+	function armWatcher(path: string, attempt = 0) {
+		watchedPath = path;
+		invoke('watch_file', { path }).catch((e) => {
+			if (watchedPath !== path || !liveMode) return;
+			if (attempt < 3) {
+				setTimeout(() => {
+					if (watchedPath === path && liveMode) armWatcher(path, attempt + 1);
+				}, 500);
+			} else {
+				console.error('Failed to watch file', path, e);
+				watchedPath = '';
+			}
+		});
+	}
+
 	$effect(() => {
 		const path = currentFile;
 		const live = liveMode;
@@ -1798,8 +1820,7 @@ import { t } from './utils/i18n.js';
 				return;
 			}
 			if (path === watchedPath) return;
-			watchedPath = path;
-			invoke('watch_file', { path }).catch(console.error);
+			armWatcher(path);
 			const tab = tabManager.activeTab;
 			if (tab && !tab.isEditing && !tab.isDirty) reloadCurrentFile();
 		});
@@ -1852,13 +1873,12 @@ import { t } from './utils/i18n.js';
 				// and swaps in the rest later, which reflows the page under the carried selection
 				try {
 					const path = tab.path;
-					const [html, content] = await Promise.all([
-						invoke('open_markdown', { path }) as Promise<string>,
-						invoke('read_file_content', { path }) as Promise<string>
-					]);
+					// one read: the rendered HTML and the raw text come from the same file version
+					const content = (await invoke('read_file_content', { path })) as string;
+					const html = (await invoke('render_markdown', { content })) as string;
 					tabManager.updateTabContent(tab.id, processMarkdownHtml(html, path, collapsedHeaders));
 					tabManager.setTabRawContent(tab.id, content);
-					if (liveMode) invoke('watch_file', { path }).catch(console.error);
+					if (liveMode) armWatcher(path);
 				} catch (e) {
 					console.error('Failed to render document for view mode', e);
 					await loadMarkdown(tab.path, { preserveEditState: true });
@@ -2034,7 +2054,7 @@ import { t } from './utils/i18n.js';
 		liveMode = !liveMode;
 		localStorage.setItem('liveMode', String(liveMode));
 		if (liveMode && currentFile) {
-			await invoke('watch_file', { path: currentFile });
+			armWatcher(currentFile);
 			if (tabManager.activeTabId) await reloadCurrentFile();
 		} else {
 			await invoke('unwatch_file');
