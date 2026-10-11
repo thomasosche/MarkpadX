@@ -19,6 +19,7 @@
 	import { exportAsHtml as _exportHtml, exportAsPdf } from './utils/export';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
+import { findTaskMarkers, resolveTaskLine, setTaskMarkerOnLine, sourceposLine, taskMarkerOnLine, type RenderedTask } from './utils/tasks.js';
 	import {
 		byteColToIndex,
 		findAll,
@@ -423,8 +424,8 @@ import { t } from './utils/i18n.js';
 		if (settings.restoreStateOnReopen) {
 			const hasUnsaved = tabManager.tabs.some((t) => t.isDirty || (t.path === '' && t.rawContent.trim() !== ''));
 			if (hasUnsaved) {
-				const response = await askCustom(t('modal.exit.unsaved.message'), {
-					title: t('modal.exit.unsaved.title'),
+				const response = await askCustom(t('modal.exitDiscardsUnsaved', settings.language), {
+					title: t('modal.unsavedChanges', settings.language),
 					kind: 'warning',
 					showSave: false,
 				});
@@ -852,6 +853,10 @@ import { t } from './utils/i18n.js';
 	$effect(() => {
 		if (markdownBody && htmlContent !== undefined) {
 			markdownBody.innerHTML = htmlContent;
+			untrack(() => {
+				const tab = tabManager.activeTab;
+				if (tab?.isDirty && !tab.isEditing) syncTaskCheckboxes(tab.rawContent);
+			});
 		}
 	});
 
@@ -1133,14 +1138,6 @@ import { t } from './utils/i18n.js';
 			return;
 		}
 
-		// task checkbox toggle in read mode
-		if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox' && target.hasAttribute('data-task-checkbox')) {
-			e.preventDefault();
-			e.stopPropagation();
-			toggleTaskCheckbox(target as HTMLInputElement);
-			return;
-		}
-
 		const a = target.closest('a');
 		if (a) {
 			const href = a.getAttribute('href');
@@ -1186,56 +1183,91 @@ import { t } from './utils/i18n.js';
         }
     }
 
-	async function toggleTaskCheckbox(checkbox: HTMLInputElement) {
+	// Toggles are applied one after another so fast clicks cannot race on the same raw content
+	let taskToggleQueue: Promise<void> = Promise.resolve();
+
+	function renderedTaskBoxes(): HTMLInputElement[] {
+		return Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []) as HTMLInputElement[];
+	}
+
+	function toggleTaskCheckbox(checkbox: HTMLInputElement) {
 		const tab = tabManager.activeTab;
-		if (!tab || !tab.path) return;
+		if (!tab) return;
 
-		// always read latest from disk to avoid stale state
-		let raw: string;
-		try {
-			raw = (await invoke('read_file_content', { path: tab.path })) as string;
-		} catch (e) {
-			console.error('failed to read file for task toggle', e);
-			return;
-		}
-
-		// find which task item this is by counting checkboxes in DOM
-		const allBoxes = Array.from(markdownBody?.querySelectorAll('[data-task-checkbox]') || []);
+		const allBoxes = renderedTaskBoxes();
 		const index = allBoxes.indexOf(checkbox);
 		if (index === -1) return;
 
-		// checkbox.checked is still the OLD state (e.preventDefault blocked the toggle)
-		const nowChecked = !checkbox.checked;
+		// the browser has already flipped the checkbox when the click handler runs: this is the NEW state
+		const nowChecked = checkbox.checked;
+		checkbox.closest('li')?.classList.toggle('task-done', nowChecked);
 
-		// replace the nth [ ] or [x] in the raw markdown
-		let count = 0;
-		const updated = raw.replace(/^(\s*[-*+] )\[( |x|X)\]/gm, (match, prefix) => {
-			if (count === index) {
-				count++;
-				return `${prefix}[${nowChecked ? 'x' : ' '}]`;
+		const task: RenderedTask = {
+			index,
+			count: allBoxes.length,
+			sourceLine: sourceposLine(checkbox.closest('li')?.getAttribute('data-sourcepos')),
+			checked: !nowChecked,
+		};
+		const tabId = tab.id;
+		taskToggleQueue = taskToggleQueue
+			.then(() => applyTaskToggle(tabId, task, nowChecked))
+			.then((ok) => {
+				if (!ok) {
+					checkbox.checked = !nowChecked;
+					checkbox.closest('li')?.classList.toggle('task-done', !nowChecked);
+				}
+			})
+			.catch((e) => {
+				console.error('failed to toggle task', e);
+				addToast(t('toast.taskToggleFailed', settings.language).replace('{{error}}', String(e)), 'error');
+			});
+	}
+
+	// Write the toggle into the tab's raw content. The change stays in memory: the tab turns dirty
+	// and is saved via Ctrl+S / File > Save, without entering edit mode.
+	async function applyTaskToggle(tabId: string, task: RenderedTask, checked: boolean): Promise<boolean> {
+		const tab = tabManager.tabs.find((t) => t.id === tabId);
+		if (!tab) return false;
+
+		// unsaved toggles live in rawContent (which the DOM reflects); a clean tab is checked against disk
+		let raw = tab.rawContent;
+		if (!tab.isDirty && tab.path) {
+			try {
+				raw = (await invoke('read_file_content', { path: tab.path })) as string;
+			} catch (e) {
+				console.error('failed to read file for task toggle', e);
+				addToast(t('toast.taskToggleFailed', settings.language).replace('{{error}}', String(e)), 'error');
+				return false;
 			}
-			count++;
-			return match;
+			if (raw !== tab.rawContent) {
+				// the rendered view is older than the file: patching it could hit the wrong line
+				addToast(t('toast.taskFileChanged', settings.language), 'warning');
+				reloadCurrentFile(true);
+				return false;
+			}
+		}
+
+		const line = resolveTaskLine(raw, task);
+		const updated = line === null ? null : setTaskMarkerOnLine(raw, line, checked);
+		if (updated === null) {
+			addToast(t('toast.taskSourceMismatch', settings.language), 'warning');
+			return false;
+		}
+		tabManager.updateTabRawContent(tab.id, updated);
+		return true;
+	}
+
+	// Re-apply unsaved checkbox states after the (stale) rendered HTML was put back into the DOM
+	function syncTaskCheckboxes(raw: string) {
+		const boxes = renderedTaskBoxes();
+		const markers = findTaskMarkers(raw);
+		boxes.forEach((box, i) => {
+			const line = sourceposLine(box.closest('li')?.getAttribute('data-sourcepos'));
+			const marker = (line !== null ? taskMarkerOnLine(raw, line) : null) ?? (boxes.length === markers.length ? markers[i] : null);
+			if (!marker) return;
+			box.checked = marker.checked;
+			box.closest('li')?.classList.toggle('task-done', marker.checked);
 		});
-
-		if (updated === raw) return;
-
-		// save file
-		try {
-			await invoke('save_file_content', { path: tab.path, content: updated });
-			tab.rawContent = updated;
-			tab.originalContent = updated;
-		} catch (e) {
-			console.error('failed to save task toggle', e);
-			return;
-		}
-
-		// update DOM optimistically
-		checkbox.checked = nowChecked;
-		const li = checkbox.closest('li');
-		if (li) {
-			li.classList.toggle('task-done', nowChecked);
-		}
 	}
 
 
@@ -1310,17 +1342,32 @@ import { t } from './utils/i18n.js';
 		if (!tab.isDirty) return true;
 
 		const response = await askCustom(t('modal.youHaveUnsavedChanges', settings.language).replace('{title}', tab.title), {
-			title: t('modal.unsavedChanges.title'),
+			title: t('modal.unsavedChanges', settings.language),
 			kind: 'warning',
 			showSave: true,
 		});
 
 		if (response === 'cancel') return false;
 		if (response === 'save') {
+			// saveContent saves the active tab
+			if (tabManager.activeTabId !== tabId) {
+				tabManager.setActive(tabId);
+				await tick();
+			}
 			return await saveContent();
 		}
 
 		return true; // discard
+	}
+
+	// Close several tabs, asking for each one with unsaved changes; stops when the user cancels
+	async function closeTabs(ids: string[], keepActiveId: string) {
+		for (const id of ids) {
+			if (!(await canCloseTab(id))) break;
+			tabManager.closeTab(id);
+		}
+		// saving activates the tab being closed; return to the tab the user acted from
+		if (tabManager.tabs.some((t) => t.id === keepActiveId)) tabManager.setActive(keepActiveId);
 	}
 
 	// Map the preview's text selection to its source block so the editor can select the same text
@@ -1696,6 +1743,21 @@ import { t } from './utils/i18n.js';
 			return;
 		}
 
+		// view mode can hold unsaved changes (task checkbox toggles): never overwrite them silently
+		if (tab.isDirty) {
+			if (!force) {
+				addToast(t('toast.fileChangedUnsavedKept', settings.language), 'warning');
+				return;
+			}
+			const response = await askCustom(t('toast.reloadDiscardsChanges', settings.language), {
+				title: t('modal.unsavedChanges', settings.language),
+				kind: 'warning',
+				showSave: true,
+			});
+			if (response === 'cancel') return;
+			if (response === 'save' && !(await saveContent())) return;
+		}
+
 		const seq = ++reloadSeq;
 		const id = tab.id;
 		const path = tab.path;
@@ -1768,8 +1830,8 @@ import { t } from './utils/i18n.js';
 				const success = await saveContent();
 				if (!success) return; // If save fails, stay in edit mode?
 			} else {
-				const response = await askCustom(t('modal.unsavedChanges.viewMode.message'), {
-					title: t('modal.unsavedChanges.title'),
+				const response = await askCustom(t('modal.unsavedChangesViewMode', settings.language), {
+					title: t('modal.unsavedChanges', settings.language),
 					kind: 'warning',
 					showSave: true,
 				});
@@ -1817,7 +1879,10 @@ import { t } from './utils/i18n.js';
 			}
 		} else {
 			// Switch to edit
-			if (tab.path !== '') {
+			if (tab.isDirty) {
+				// keep unsaved view-mode changes (e.g. toggled task checkboxes)
+				tab.isEditing = true;
+			} else if (tab.path !== '') {
 				try {
 					const content = (await invoke('read_file_content', { path: tab.path })) as string;
 					tab.rawContent = content;
@@ -1838,7 +1903,8 @@ import { t } from './utils/i18n.js';
 
 	async function saveContent(): Promise<boolean> {
 		const tab = tabManager.activeTab;
-		if (!tab || (!tab.isEditing && !tab.isSplit)) return false;
+		// view mode can still hold unsaved changes (e.g. toggled task checkboxes)
+		if (!tab || (!tab.isEditing && !tab.isSplit && !tab.isDirty)) return false;
 
 		let targetPath = tab.path;
 
@@ -1869,6 +1935,7 @@ import { t } from './utils/i18n.js';
 			return true;
 		} catch (e) {
 			console.error('Failed to save file', e);
+			addToast(t('toast.saveFailed', settings.language).replace('{{path}}', targetPath).replace('{{error}}', String(e)), 'error');
 			return false;
 		}
 	}
@@ -1895,6 +1962,7 @@ import { t } from './utils/i18n.js';
 				return true;
 			} catch (e) {
 				console.error('Failed to save file as', e);
+				addToast(t('toast.saveFailed', settings.language).replace('{{path}}', selected).replace('{{error}}', String(e)), 'error');
 				return false;
 			}
 		}
@@ -2188,6 +2256,19 @@ import { t } from './utils/i18n.js';
 		(event as any).__markpadHandled = true;
 		tooltip.show = false;
 		let target = event.target as HTMLElement;
+
+		// task checkbox toggle in read mode; the native toggle is kept (no preventDefault)
+		if (target?.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox' && target.hasAttribute('data-task-checkbox')) {
+			event.stopPropagation();
+			if (event.type !== 'click') {
+				// Space on a focused checkbox is followed by a native click; Enter is not, so click explicitly
+				if ((event as unknown as KeyboardEvent).key === 'Enter') (target as HTMLInputElement).click();
+				return;
+			}
+			toggleTaskCheckbox(target as HTMLInputElement);
+			return;
+		}
+
 		while (target && target.tagName !== 'A' && target !== document.body) target = target.parentElement as HTMLElement;
 		if (target?.tagName === 'A') {
 			const anchor = target as HTMLAnchorElement;
@@ -2302,8 +2383,8 @@ import { t } from './utils/i18n.js';
 					const success = await saveContent();
 					if (!success) return;
 				} else {
-					const response = await askCustom(t('modal.unsavedChanges.splitView.message'), {
-						title: t('modal.unsavedChanges.title'),
+					const response = await askCustom(t('modal.unsavedChangesSplitView', settings.language), {
+						title: t('modal.unsavedChanges', settings.language),
 						kind: 'warning',
 						showSave: true,
 					});
@@ -2343,10 +2424,7 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			const activeId = tabManager.activeTabId;
 			if (activeId) {
-				tabManager.tabs
-					.filter((t) => t.id !== activeId)
-					.map((t) => t.id)
-					.forEach((id) => tabManager.closeTab(id));
+				closeTabs(tabManager.tabs.filter((t) => t.id !== activeId).map((t) => t.id), activeId);
 			}
 		}
 		if (cmdOrCtrl && !e.shiftKey && key === 't') {
@@ -2386,7 +2464,7 @@ import { t } from './utils/i18n.js';
 			if (!isSplit) toggleEdit(true);
 		}
 		if (cmdOrCtrl && key === 's') {
-			if (isEditing || isSplit) {
+			if (isEditing || isSplit || tabManager.activeTab?.isDirty) {
 				e.preventDefault();
 				saveContent();
 			}
@@ -2723,19 +2801,19 @@ import { t } from './utils/i18n.js';
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close-others', (event) => {
+				await listen('menu-tab-close-others', async (event) => {
 					const tabId = event.payload as string;
 					const tabsToClose = tabManager.tabs.filter((t) => t.id !== tabId).map((t) => t.id);
-					tabsToClose.forEach((id) => tabManager.closeTab(id));
+					await closeTabs(tabsToClose, tabId);
 				}),
 			);
 			unlisteners.push(
-				await listen('menu-tab-close-right', (event) => {
+				await listen('menu-tab-close-right', async (event) => {
 					const tabId = event.payload as string;
 					const index = tabManager.tabs.findIndex((t) => t.id === tabId);
 					if (index !== -1) {
 						const tabsToClose = tabManager.tabs.slice(index + 1).map((t) => t.id);
-						tabsToClose.forEach((id) => tabManager.closeTab(id));
+						await closeTabs(tabsToClose, tabId);
 					}
 				}),
 			);

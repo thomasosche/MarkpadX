@@ -203,13 +203,22 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagram saved as SVG',
             failedToSaveDiagram: 'Failed to save diagram',
             failedToCopyCode: 'Failed to copy code',
-            unsupportedFile: 'Unsupported file type: {{filename}}'
+            unsupportedFile: 'Unsupported file type: {{filename}}',
+            taskToggleFailed: 'Could not update the task in the file: {{error}}',
+            taskSourceMismatch: 'This checkbox could not be matched to a line in the file. Toggle it in edit mode.',
+            taskFileChanged: 'The file changed on disk. Reloaded - please click the checkbox again.',
+            fileChangedUnsavedKept: 'The file changed on disk. Your unsaved changes were kept - press F5 to reload and discard them.',
+            reloadDiscardsChanges: 'Reloading discards your unsaved changes. Save them first?',
+            saveFailed: 'Could not save {{path}}: {{error}}'
         },
         modal: {
             confirmExit: 'Confirm Exit',
             areYouSureYouWantToExit: 'Are you sure you want to exit? All unsaved tabs and local history will be lost.',
             unsavedChanges: 'Unsaved Changes',
             youHaveUnsavedChanges: 'You have unsaved changes in "{title}". Do you want to save them before closing?',
+            unsavedChangesViewMode: 'You have unsaved changes. Do you want to save them before switching to view mode?',
+            unsavedChangesSplitView: 'You have unsaved changes. Do you want to save them before closing split view?',
+            exitDiscardsUnsaved: 'There are unsaved changes. Exiting discards them and the restored session. Exit anyway?',
             youHaveUnsavedChangesBeforeReturning: 'You have unsaved changes. Do you want to save them before returning to view mode?',
             youHaveUnsavedChangesBeforeClosingSplitView: 'You have unsaved changes. Do you want to save them before closing split view?',
             youHaveUnsavedFiles: 'You have {{count}} unsaved file(s). Do you want to save your changes?'
@@ -2019,13 +2028,22 @@ export const translations: Record<LanguageCode, Translation> = {
             diagramSavedAsSVG: 'Diagramm als SVG gespeichert',
             failedToSaveDiagram: 'Diagramm speichern fehlgeschlagen',
             failedToCopyCode: 'Code kopieren fehlgeschlagen',
-            unsupportedFile: 'Nicht unterstützter Dateityp: {{filename}}'
+            unsupportedFile: 'Nicht unterstützter Dateityp: {{filename}}',
+            taskToggleFailed: 'Aufgabe konnte in der Datei nicht aktualisiert werden: {{error}}',
+            taskSourceMismatch: 'Diese Checkbox konnte keiner Zeile der Datei zugeordnet werden. Bitte im Bearbeitungsmodus ändern.',
+            taskFileChanged: 'Die Datei wurde extern geändert und neu geladen - bitte die Checkbox erneut anklicken.',
+            fileChangedUnsavedKept: 'Die Datei wurde extern geändert. Ihre ungespeicherten Änderungen bleiben erhalten - F5 lädt neu und verwirft sie.',
+            reloadDiscardsChanges: 'Neu laden verwirft Ihre ungespeicherten Änderungen. Vorher speichern?',
+            saveFailed: '{{path}} konnte nicht gespeichert werden: {{error}}'
         },
         modal: {
             confirmExit: 'Beenden bestätigen',
             areYouSureYouWantToExit: 'Sind Sie sicher, dass Sie beenden möchten? Alle ungespeicherten Tabs und der lokale Verlauf gehen verloren.',
             unsavedChanges: 'Ungespeicherte Änderungen',
             youHaveUnsavedChanges: 'Sie haben ungespeicherte Änderungen in "{title}". Möchten Sie diese vor dem Schließen speichern?',
+            unsavedChangesViewMode: 'Sie haben ungespeicherte Änderungen. Möchten Sie diese vor dem Wechsel in die Ansicht speichern?',
+            unsavedChangesSplitView: 'Sie haben ungespeicherte Änderungen. Möchten Sie diese vor dem Schließen der geteilten Ansicht speichern?',
+            exitDiscardsUnsaved: 'Es gibt ungespeicherte Änderungen. Beim Beenden gehen sie und die wiederherzustellende Sitzung verloren. Trotzdem beenden?',
             youHaveUnsavedChangesBeforeReturning: 'Sie haben ungespeicherte Änderungen. Möchten Sie diese vor der Rückkehr zum Vorschau-Modus speichern?',
             youHaveUnsavedChangesBeforeClosingSplitView: 'Sie haben ungespeicherte Änderungen. Möchten Sie diese vor dem Schließen der geteilten Ansicht speichern?',
             youHaveUnsavedFiles: 'Sie haben {{count}} ungespeicherte Datei(en). Möchten Sie Ihre Änderungen speichern?'

@@ -65,23 +65,23 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="tab {isActive ? 'active' : ''}" class:last={isLast} role="group" title={tab.path || 'Recents'} oncontextmenu={handleContextMenu}>
+<div class="tab {isActive ? 'active' : ''}" class:last={isLast} class:dirty={tab.isDirty} role="group" title={tab.path || 'Recents'} oncontextmenu={handleContextMenu}>
 	<button class="tab-content-btn" onclick={onclick} onmousedown={(e) => {
 		if (e.button === 0) e.preventDefault();
 		handleMiddleClick(e);
 	}}>
+		{#if tab.isDirty}
+			<span class="dirty-dot" aria-hidden="true"></span>
+		{/if}
 		<span class="tab-label">
 			{tab.title}
 		</span>
 	</button>
 	<div class="tab-actions">
-		<button class="tab-close" class:dirty={tab.isDirty} onclick={handleClose} onmousedown={(e) => {
+		<button class="tab-close" onclick={handleClose} onmousedown={(e) => {
 			e.stopPropagation();
 			e.preventDefault();
 		}} title={`${t('tooltip.close', settings.language)} (Ctrl+W)`}>
-			{#if tab.isDirty}
-				<span class="dirty-dot"></span>
-			{/if}
 			<svg class="close-icon" width="12" height="12" viewBox="0 0 12 12"
 				><path fill="currentColor" d="M11 1.7L10.3 1 6 5.3 1.7 1 1 1.7 5.3 6 1 10.3 1.7 11 6 6.7 10.3 11 11 10.3 6.7 6z" /></svg>
 		</button>
@@ -158,8 +158,7 @@
 	}
 
 	.tab:hover .tab-actions,
-	.tab.active .tab-actions,
-	.tab-actions:has(.dirty) {
+	.tab.active .tab-actions {
 		opacity: 1;
 	}
 
@@ -188,11 +187,9 @@
 		display: block;
 	}
 
-	.tab:hover .dirty-dot {
-		display: none;
-	}
-
+	/* unsaved changes: always visible in front of the tab name */
 	.dirty-dot {
+		flex-shrink: 0;
 		width: 8px;
 		height: 8px;
 		background-color: var(--color-fg-default);

@@ -38,6 +38,16 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 ### Tab Navigation
 - `←` / `→` (preview mode) switch to the previous / next tab
 - Mouse buttons 4 / 5 (back / forward) walk the most-recently-used tab history — clicking a markdown link opens a new tab, mouse-back returns to the originating tab
+- `Ctrl+Shift+W` closes all other tabs (asks for each tab with unsaved changes)
+- Tabs with unsaved changes show a dot in front of the tab name
+
+### Task Lists in Preview
+- Task checkboxes (`- [ ]` / `- [x]`) can be toggled directly in preview mode, no edit mode needed
+- A toggle is kept in memory and marks the tab as unsaved; save with `Ctrl+S` or File → Save. Toggling back to the saved state clears the mark
+- Each checkbox is mapped to its exact source line (bullet and numbered lists, nested and blockquoted items); checkboxes in code blocks are never touched
+- If a checkbox cannot be matched safely, or the file changed on disk since it was rendered, nothing is changed and a notice is shown
+- Unsaved toggles survive tab switches and are shown in the editor when switching to edit mode; live reload never overwrites them (`F5` asks first)
+- Keyboard: `Space` or `Enter` on a focused checkbox toggles it
 
 ### Selection Carry-over (Edit ↔ View)
 - Text selected in the rendered preview stays selected in the editor when switching to edit mode, and vice versa

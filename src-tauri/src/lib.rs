@@ -737,10 +737,14 @@ pub fn run() {
 
     #[cfg(target_os = "windows")]
     {
-        std::env::set_var(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            "--enable-features=SmoothScrolling",
-        );
+        // keep caller-provided WebView2 args (e.g. --remote-debugging-port for automated tests)
+        let mut args = String::from("--enable-features=SmoothScrolling");
+        if let Ok(existing) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+            if !existing.trim().is_empty() {
+                args = format!("{} {}", existing.trim(), args);
+            }
+        }
+        std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args);
     }
 
     tauri::Builder::default()
