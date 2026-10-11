@@ -65,6 +65,7 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - Clicking a heading reliably jumps to it on the **first click** — the view jumps instantly to the target and highlights it, then re-pins if the content reflows while rendering (mermaid, KaTeX, syntax highlighting and images change heights after load)
 - Rapid clicks don't fight each other — a newer click supersedes any in-flight jump
 - The pane refreshes **automatically** whenever the document content changes (tab switch, edit, reload), one frame after the new content is in the DOM, so no `F5` is needed to see an up-to-date outline
+- The outline is **always docked** beside the text (no undock option) and never covers it; the **switch side** button in its header moves it, and the folder pane, to the other side
 
 ### Folder pane
 - A second side pane, on the **opposite side from the outline**, lists the Markdown (`.md`) files of a folder — flat, one level, sorted by name with numbers in natural order (`2.md` before `10.md`)

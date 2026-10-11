@@ -108,6 +108,8 @@ With many open files the strip truncates titles and needs scroll arrows; a verti
 - [ ] Bulk close (Ctrl+Shift+W, close others, close to the right): **single three-button dialog** — *Keep unsaved open* (default, Enter/Escape; closes only clean tabs, focuses the first dirty one), *Save all and close* (an untitled tab opens Save As; a cancelled Save As keeps that tab open and continues), *Discard all and close*. Build on upstream #243; the dialog helper needs custom button labels. Still open from the review: the fork today prompts per tab.
 - [ ] Ctrl+Shift+W = close all other tabs; ←/→ in preview = previous/next tab; `?` opens the shortcuts dialog. Register in upstream's shortcut registry (`shortcuts.ts`, #488) and check for chord collisions.
 - [ ] Enter toggles a focused task checkbox (upstream reacts to the change event, Space only).
+- [ ] Side panes are **always docked** (no dock/undock option); the outline header has only the switch-side button. Upstream has an overlay/pinned outline and a resizable TOC (#190) — keep docked-only as the fork default.
+- [ ] Folder pane header: **no close (X) button** (the floating toggle closes it) and a **switch-side** button that swaps folder pane and outline.
 
 *P3 · Fork-unique behaviour to port (upstream has no equivalent)*
 - [ ] Selection-text carry-over edit ↔ view (`selection.ts`, `captureViewSelection`, `applyViewSelectionSettled`, `Editor.getSelectionInfo` / `selectSourceText`). Upstream carries the *line* only (`editorPosition.ts`, `previewAnchor.ts`); layer the text selection on top of upstream's line mechanism.
@@ -117,6 +119,7 @@ With many open files the strip truncates titles and needs scroll arrows; a verti
 - [ ] Task-toggle safety net: sourcepos state check + count-agreement fallback with refusal toast, stale-render check, failure toasts (`resolveTaskLine` in `tasks.ts`). Upstream maps by sourcepos but has no state check.
 - [ ] Watcher re-arm guard and 3× retry (`armWatcher`). Upstream watches the directory (#697); port only the retry if upstream still arms once.
 - [ ] Tests `tests/tasks.test.mjs`, `tests/linemap.test.mjs` → upstream's vitest; E2E harness with throw-away `WEBVIEW2_USER_DATA_FOLDER` (check `scripts/*.test.ts` for an existing harness first).
+- [ ] Folder pane (I-05): `FolderPane.svelte`, `folderPane.svelte.ts`, `utils/folderPane.ts`, Rust `folder.rs` (`list_markdown_files`, no link following, junctions skipped on Windows), always docked opposite the outline, pin / Open Folder…, refresh triggers; tests `tests/folderPane.test.mjs`, Rust unit tests, E2E `tests/e2e/folder.mjs`. If upstream has merged PR #964 (folder tree) by then, compare first: port only the flat "files of the current folder" behaviour and the owner's spec decisions on top.
 - [ ] i18n flat keys `modal.unsavedChangesViewMode`, `modal.unsavedChangesSplitView`, `modal.exitDiscardsUnsaved`, `toast.*` in en + de. Upstream ships English only and fetches other languages on first use (#945).
 
 *P4 · Fork features to compare — keep upstream's if equal or better*
@@ -134,6 +137,8 @@ With many open files the strip truncates titles and needs scroll arrows; a verti
 - [ ] Reload-pin release should also react to window-level keys (PageDown etc. with focus outside the preview); today only `wheel` / `mousedown` / `keydown` on the preview body release the pin. Re-check against upstream's `previewAnchor.ts`; drop if not applicable.
 - [ ] One cancel handle for both settle loops (selection re-apply after edit→view, reload pin), so a live reload inside the 5 s window does not fight the selection re-apply. Same re-check.
 - [ ] Toast on a failed reload (save and toggle failures already have toasts).
+- [ ] The "file changed on disk, unsaved changes kept" notice offers **Reload (discard)** and **Keep** buttons instead of the "press F5" hint.
+- [ ] Edit→view glow colour follows the highlight-colour setting instead of fixed amber (optional).
 - [ ] README: rewrite "New in MarkpadX (vs. upstream)" to list only P1–P3; everything upstream covers moves out.
 
 **Open questions**
@@ -308,3 +313,59 @@ Notes and tech-file folders hold many related `.md` files. Today you open them o
 
 *Design note for later*
 - `watch_file` keeps a single watcher slot that is replaced per active tab. A folder watcher would need its own slot in `WatcherState`. No watcher for v1 (A2), but write `refresh()` so a future `folder-changed` event just calls it.
+
+---
+
+## I-06 · Dependency major upgrades left over from `npm audit`
+
+- **Status:** idea
+- **Added:** 2026-10-11 (after `npm audit fix`: 21 → 7 advisories, 5 low, 2 moderate, no high left)
+
+**What**
+- `monaco-editor` 0.55 → 0.57 (also brings the fixed `dompurify`).
+- `katex` 0.16 → 0.19 (`mermaid` depends on the vulnerable range).
+- Review `npm approve-scripts` for `esbuild` (install script not yet covered by `allowScripts`).
+
+**Why**
+These are the last open advisories; both are major version steps that `npm audit fix` will not take on its own.
+
+**Notes**
+- Monaco: check the editor API used in `Editor.svelte` (decorations, `setValue` / view state, `getScrolledVisiblePosition`, themes incl. `editor.lineHighlightBorder`), vim mode (`monaco-vim`) and the language workers.
+- KaTeX 0.19: check math rendering in the preview and in mermaid diagrams; run the carry-over and reload E2E suites (they render KaTeX-free fixtures, so add a math sample).
+- Best done together with or after the upstream rebase (I-03), since upstream may already be on newer versions.
+
+**Open questions**
+- Upgrade now in the fork, or only as part of I-03?
+
+---
+
+## I-07 · Editor zoom consistent in edit and split view
+
+- **Status:** idea — the owner accepted the current behaviour on 2026-10-11; revisit if it gets in the way
+- **Added:** 2026-10-11 (observation test, split view + zoom)
+
+**What was measured** (on-screen editor text height in px; preview 21 / 32 / 43 px at 100 / 150 / 200 %, consistent everywhere)
+
+| Situation | 100 % | 200 % |
+|---|---|---|
+| Edit mode, zoom set before opening the editor | 17 | 17 (zoom ignored) |
+| Edit mode, zoom changed while the editor is open | 17 | 33 |
+| Split view, entered at that zoom | 17 | 33 |
+| Split view, zoom changed while in split view | 17 | line height 76 instead of 38 (zoomed twice) |
+
+**Cause**
+- The editor applies the zoom to its font size only when the zoom *changes* while it is open (the options `$effect` in `Editor.svelte` does not run when the editor is created).
+- In split view the whole `.markdown-container` is zoomed by CSS, and the editor multiplies its font by the zoom on top.
+
+**Proposal**
+One source of zoom per mode: edit mode → font size = base × zoom, also at creation; split view → base font size (the container zoom scales it). Add the table above as an asserting E2E test.
+
+---
+
+## I-08 · Run the ported E2E suites once in the repo
+
+- **Status:** planned
+- **Added:** 2026-10-11
+
+**What**
+The `carry` (68 cases) and `reload` (42 cases) suites were moved from a scratch folder into `tests/e2e/` and adapted to the shared harness, but have not been run there yet (`main` 23/23 and `folder` 11/11 have). Run `npm run test:e2e -- carry reload` on a fresh debug build and fix anything the move broke.
