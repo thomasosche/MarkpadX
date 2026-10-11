@@ -1411,3 +1411,27 @@ body {
 .markdown-body .content-inner > .markdown-alert:first-child {
 	margin-top: 12px !important;
 }
+
+/* Short glow on the carried row after switching from edit to view mode; it is the only marker
+ * and fades out completely. Same hue as the editor's caret-line frame. */
+.mode-switch-glow {
+	position: fixed;
+	pointer-events: none;
+	z-index: 50;
+	border-radius: 4px;
+	background-color: rgba(255, 196, 0, 0.35);
+	box-shadow: 0 0 14px 4px rgba(255, 196, 0, 0.55);
+	animation: mode-switch-glow 1.2s ease-out forwards;
+}
+
+@keyframes mode-switch-glow {
+	0% { opacity: 0; }
+	15% { opacity: 1; }
+	100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mode-switch-glow {
+		animation-duration: 0.4s;
+	}
+}

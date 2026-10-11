@@ -20,6 +20,7 @@
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
 import { findTaskMarkers, resolveTaskLine, setTaskMarkerOnLine, sourceposLine, taskMarkerOnLine, type RenderedTask } from './utils/tasks.js';
+import { mapLines, type LineMapping } from './utils/linemap.js';
 	import {
 		byteColToIndex,
 		findAll,
@@ -1385,9 +1386,10 @@ import { t } from './utils/i18n.js';
 		const endLine = parseInt(end, 10) || startLine;
 		const same = body.querySelectorAll<HTMLElement>(`[data-sourcepos="${CSS.escape(anchor.sourcepos)}"]`);
 		const el = same[anchor.index] ?? same[0];
-		const height = el?.getBoundingClientRect().height || 1;
+		// anchor.delta is in preview units, the rect in screen pixels (zoom)
+		const height = (el?.getBoundingClientRect().height || 1) / previewScale(body);
 		const line = startLine + Math.round((endLine - startLine) * Math.min(1, Math.max(0, anchor.delta / height)));
-		return { text: '', startLine: line, endLine: line, startColumn: 1, occurrence: 0, viewportOffset: PREVIEW_ANCHOR_OFFSET };
+		return { text: '', startLine: line, endLine: line, startColumn: 1, occurrence: 0, viewportOffset: PREVIEW_ANCHOR_OFFSET * previewScale(body) };
 	}
 
 	function captureVisibleSelection(markdownBody: HTMLElement): SourceSelection | null {
@@ -1475,17 +1477,9 @@ import { t } from './utils/i18n.js';
 
 	// Marks the editor's caret row in the preview without touching the real selection
 	// (CSS Custom Highlight API). Cleared on the next click or key press in the preview.
-	function setRowHighlight(range: Range | null) {
-		const registry = (CSS as any).highlights;
-		const HighlightCtor = (window as any).Highlight;
-		if (!registry || !HighlightCtor) return;
-		if (range) registry.set('mode-switch-row', new HighlightCtor(range));
-		else registry.delete('mode-switch-row');
-	}
-
 	// Select the editor's selected text in the rendered preview (or mark the caret row) and scroll it
 	// to the height it had in the editor
-	function applyViewSelection(info: SourceSelection) {
+	function applyViewSelection(info: SourceSelection, scroll = true) {
 		if (!markdownBody) return;
 
 		// Visible elements on the selection's line, innermost first; those also containing its column
@@ -1511,7 +1505,7 @@ import { t } from './utils/i18n.js';
 			}
 		}
 
-		// Plain caret: locate the caret's whole row so it can be marked and positioned exactly
+		// Plain caret: locate the caret's whole row so it can be positioned exactly (and glow)
 		let rowRange: Range | null = null;
 		if (!range && info.lineText !== undefined) {
 			const rowNeedle = normalize(sourceToPlain(info.lineText));
@@ -1557,15 +1551,25 @@ import { t } from './utils/i18n.js';
 			}
 		}
 
-		if (y !== null) {
+		if (y !== null && scroll) {
+			// Rects are on-screen pixels, but scrollTop / clientHeight are in the preview's own units,
+			// which differ by the zoom factor (zoom is set on an ancestor). Work in screen pixels, like
+			// the editor's viewportOffset, and convert only the final scroll distance.
+			const scale = previewScale(markdownBody);
+			const viewHeight = bodyRect.height;
 			const offset = info.viewportOffset !== undefined
-				? Math.max(0, Math.min(info.viewportOffset, markdownBody.clientHeight - 40))
-				: markdownBody.clientHeight / 2 - height / 2;
+				? Math.max(0, Math.min(info.viewportOffset, viewHeight - 40))
+				: viewHeight / 2 - height / 2;
 			const maxScroll = markdownBody.scrollHeight - markdownBody.clientHeight;
-			const targetScroll = Math.max(0, Math.min(maxScroll, markdownBody.scrollTop + y - offset));
-			if (Math.abs(markdownBody.scrollTop - targetScroll) > 1) {
+			const startScroll = markdownBody.scrollTop;
+			const targetScroll = Math.max(0, Math.min(maxScroll, startScroll + (y - offset) / scale));
+			if (Math.abs(startScroll - targetScroll) > 1) {
 				isProgrammaticScroll = true;
 				markdownBody.scrollTop = targetScroll;
+			}
+			if (modeSwitchGlowActive) {
+				const top = bodyRect.top + y - (markdownBody.scrollTop - startScroll) * scale;
+				showModeSwitchGlow(bodyRect.left, top, markdownBody.clientWidth * scale, height || 24 * scale);
 			}
 		}
 
@@ -1574,16 +1578,51 @@ import { t } from './utils/i18n.js';
 			sel?.removeAllRanges();
 			sel?.addRange(range);
 		}
-		setRowHighlight(range ? null : rowRange);
 	}
 
 	// Apply the carried selection, then keep re-applying it while the preview settles. The page is
 	// re-rendered after the mode switch (full-document load for large files, mermaid/KaTeX/highlight.js,
 	// TOC/split re-render), which replaces DOM nodes (dropping the selection) and shifts the layout.
 	// Stops on user interaction or after a timeout.
+	// Screen pixels per preview CSS pixel (the zoom applied by an ancestor)
+	function previewScale(body: HTMLElement): number {
+		const scale = body.getBoundingClientRect().height / body.offsetHeight;
+		return Number.isFinite(scale) && scale > 0 ? scale : 1;
+	}
+
+	// Short glow on the carried row after an edit -> view switch. A fixed overlay outside the zoomed
+	// container (screen coordinates); it follows re-applies while the preview settles and fades into
+	// nothing (a carried selection stays selected).
+	let modeSwitchGlowActive = false;
+	let modeSwitchGlowEl: HTMLDivElement | null = null;
+
+	function showModeSwitchGlow(left: number, top: number, width: number, height: number) {
+		if (!modeSwitchGlowEl) {
+			const el = document.createElement('div');
+			el.className = 'mode-switch-glow';
+			el.addEventListener('animationend', hideModeSwitchGlow);
+			document.body.appendChild(el);
+			modeSwitchGlowEl = el;
+		}
+		Object.assign(modeSwitchGlowEl.style, {
+			left: `${left}px`,
+			top: `${top - 2}px`,
+			width: `${width}px`,
+			height: `${height + 4}px`,
+		});
+	}
+
+	function hideModeSwitchGlow() {
+		modeSwitchGlowActive = false;
+		modeSwitchGlowEl?.remove();
+		modeSwitchGlowEl = null;
+	}
+
 	function applyViewSelectionSettled(info: SourceSelection) {
 		const body = markdownBody;
 		if (!body) return;
+		hideModeSwitchGlow();
+		modeSwitchGlowActive = true;
 
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const reapply = () => {
@@ -1603,19 +1642,12 @@ import { t } from './utils/i18n.js';
 			body.removeEventListener('wheel', stop);
 			body.removeEventListener('mousedown', stop);
 			body.removeEventListener('keydown', stop);
+			hideModeSwitchGlow(); // a fixed overlay would no longer match the scrolled content
 		};
 		const deadline = setTimeout(stop, 5000);
 		body.addEventListener('wheel', stop, { passive: true });
 		body.addEventListener('mousedown', stop);
 		body.addEventListener('keydown', stop);
-
-		const clearRow = () => {
-			setRowHighlight(null);
-			body.removeEventListener('mousedown', clearRow);
-			body.removeEventListener('keydown', clearRow);
-		};
-		body.addEventListener('mousedown', clearRow);
-		body.addEventListener('keydown', clearRow);
 
 		applyViewSelection(info);
 	}
@@ -1632,8 +1664,10 @@ import { t } from './utils/i18n.js';
 
 	const PREVIEW_ANCHOR_OFFSET = 60;
 
+	// Element top in the preview's own units (comparable with scrollTop): rects are screen pixels,
+	// which differ by the zoom factor
 	function topInPreview(el: HTMLElement, body: HTMLElement) {
-		return el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+		return (el.getBoundingClientRect().top - body.getBoundingClientRect().top) / previewScale(body) + body.scrollTop;
 	}
 
 	// Captures the source element at the top of the preview: the deepest visible [data-sourcepos]
@@ -1665,19 +1699,49 @@ import { t } from './utils/i18n.js';
 		};
 	}
 
-	// Scrolls the captured element back to the same spot. Falls back to the source line when the
-	// element no longer exists (lines shifted by an external edit), then to the raw scrollTop.
+	// Move a captured anchor to the new text after an external change, so the same content stays in
+	// view. An element whose first line was deleted moves to the nearest surviving line above it,
+	// which is then placed at the anchor offset. The remapped sourcepos is a prefix ("line:col-").
+	function remapPreviewAnchor(anchor: PreviewAnchor, map: LineMapping): PreviewAnchor {
+		const m = anchor.sourcepos.match(/^(\d+):(\d+)-/);
+		if (!m) return anchor;
+		const oldLine = Number(m[1]);
+		const line = map.line(oldLine);
+		if (map.status(oldLine) !== 'deleted') return { ...anchor, sourcepos: `${line}:${m[2]}-`, line };
+		return { ...anchor, sourcepos: `${line}:`, index: 0, line, delta: 0 };
+	}
+
+	// Deepest visible element starting on the given line, else the closest one starting above it
+	function elementAtOrAbove(body: HTMLElement, line: number): HTMLElement | null {
+		let best: HTMLElement | null = null;
+		let bestLine = -1;
+		for (const el of Array.from(body.querySelectorAll<HTMLElement>('[data-sourcepos]'))) {
+			if (el.getClientRects().length === 0) continue;
+			const start = parseInt(el.dataset.sourcepos || '', 10);
+			if (start <= line && start >= bestLine) {
+				best = el;
+				bestLine = start;
+			}
+		}
+		return best;
+	}
+
+	// Scrolls the captured element back to the same spot. Falls back to the closest element at or
+	// above the source line when the element no longer exists, then to the raw scrollTop.
 	function restorePreviewAnchor(body: HTMLElement, anchor: PreviewAnchor) {
+		const prefix = anchor.sourcepos.endsWith('-') || anchor.sourcepos.endsWith(':');
 		const same = anchor.sourcepos
-			? body.querySelectorAll<HTMLElement>(`[data-sourcepos="${CSS.escape(anchor.sourcepos)}"]`)
+			? body.querySelectorAll<HTMLElement>(`[data-sourcepos${prefix ? '^' : ''}="${CSS.escape(anchor.sourcepos)}"]`)
 			: [];
-		const el = same[anchor.index] ?? same[0];
+		let el: HTMLElement | null = same[anchor.index] ?? same[0] ?? null;
+		let delta = anchor.delta;
+		if ((!el || el.getClientRects().length === 0) && anchor.line > 0) {
+			el = elementAtOrAbove(body, anchor.line);
+			delta = 0;
+		}
 		let target: number;
 		if (el && el.getClientRects().length > 0) {
-			target = topInPreview(el, body) + anchor.delta - PREVIEW_ANCHOR_OFFSET;
-		} else if (anchor.line > 0) {
-			scrollToLine(anchor.line, body.clientHeight > 0 ? Math.min(1, PREVIEW_ANCHOR_OFFSET / body.clientHeight) : 0);
-			return;
+			target = topInPreview(el, body) + delta - PREVIEW_ANCHOR_OFFSET;
 		} else {
 			target = anchor.scrollTop;
 		}
@@ -1691,12 +1755,15 @@ import { t } from './utils/i18n.js';
 	// Keep the reader's position pinned while a reloaded preview settles. Swapping innerHTML and the
 	// async mermaid/KaTeX/highlight.js passes change the document height, which clamps scrollTop and
 	// leaves the view somewhere else. Stops on user interaction or after a timeout.
-	function pinPreviewPositionSettled(anchor: PreviewAnchor) {
+	function pinPreviewPositionSettled(anchor: PreviewAnchor, selection: SourceSelection | null = null) {
 		const body = markdownBody;
 		if (!body) return;
 		cancelReloadPin?.();
 
-		const apply = () => restorePreviewAnchor(body, anchor);
+		const apply = () => {
+			restorePreviewAnchor(body, anchor);
+			if (selection) applyViewSelection(selection, false);
+		};
 
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const reapply = () => {
@@ -1738,13 +1805,19 @@ import { t } from './utils/i18n.js';
 	async function reloadCurrentFile(force = false) {
 		const tab = tabManager.activeTab;
 		if (!tab || !tab.path) return;
-		if (tab.isEditing || !markdownBody) {
-			await loadMarkdown(tab.path);
-			return;
-		}
 
-		// view mode can hold unsaved changes (task checkbox toggles): F5 / Ctrl+R asks before discarding
-		if (tab.isDirty && force) {
+		// Unsaved changes (editor edits or view-mode checkbox toggles) are never replaced silently:
+		// a live reload keeps them and only reports a real change on disk; F5 / Ctrl+R asks first.
+		if (tab.isDirty) {
+			if (!force) {
+				try {
+					const disk = (await invoke('read_file_content', { path: tab.path })) as string;
+					if (disk !== tab.originalContent) addToast(t('toast.fileChangedUnsavedKept', settings.language), 'warning');
+				} catch (e) {
+					console.error('Error checking file for changes:', e);
+				}
+				return;
+			}
 			const response = await askCustom(t('toast.reloadDiscardsChanges', settings.language), {
 				title: t('modal.unsavedChanges', settings.language),
 				kind: 'warning',
@@ -1754,10 +1827,17 @@ import { t } from './utils/i18n.js';
 			if (response === 'save' && !(await saveContent())) return;
 		}
 
+		if (tab.isEditing || !markdownBody) {
+			await loadMarkdown(tab.path);
+			return;
+		}
+
 		const seq = ++reloadSeq;
 		const id = tab.id;
 		const path = tab.path;
 		const anchor = capturePreviewAnchor(markdownBody);
+		const oldRaw = tab.rawContent;
+		const visibleSelection = captureVisibleSelection(markdownBody);
 		const isCurrent = () => seq === reloadSeq && tabManager.activeTabId === id && tab.path === path;
 
 		try {
@@ -1765,7 +1845,7 @@ import { t } from './utils/i18n.js';
 			const content = (await invoke('read_file_content', { path })) as string;
 			if (!isCurrent()) return;
 			if (tab.isDirty && !force) {
-				// keep unsaved toggles; only tell the user when the file really changed on disk
+				// a checkbox was toggled while the file was being read: keep the unsaved toggle
 				if (content !== tab.originalContent) addToast(t('toast.fileChangedUnsavedKept', settings.language), 'warning');
 				return;
 			}
@@ -1775,7 +1855,12 @@ import { t } from './utils/i18n.js';
 			tabManager.updateTabContent(id, processMarkdownHtml(html, path, collapsedHeaders));
 			tabManager.setTabRawContent(id, content);
 			await tick();
-			pinPreviewPositionSettled(anchor);
+			// keep the same content in view (and the selection, unless its text was deleted)
+			const map = mapLines(oldRaw, content);
+			const selection = visibleSelection && visibleSelection.text.trim() && map.status(visibleSelection.startLine) !== 'deleted'
+				? { ...visibleSelection, startLine: map.line(visibleSelection.startLine), endLine: map.line(visibleSelection.endLine), viewportOffset: undefined }
+				: null;
+			pinPreviewPositionSettled(remapPreviewAnchor(anchor, map), selection);
 		} catch (e) {
 			console.error('Error reloading file:', e);
 		} finally {
@@ -1839,7 +1924,7 @@ import { t } from './utils/i18n.js';
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
 		if (showPreviewSearch) closePreviewSearch();
-		setRowHighlight(null);
+		hideModeSwitchGlow();
 
 		// Carry the cursor/selection across the mode switch (not needed in split view)
 		const carriedSelection = isSplit ? null : isEditing ? editorPane?.getSelectionInfo() ?? null : captureViewSelection();
@@ -3317,10 +3402,6 @@ import { t } from './utils/i18n.js';
 <ContextMenu {...docContextMenu} onhide={() => (docContextMenu.show = false)} />
 
 <style>
-	:global(::highlight(mode-switch-row)) {
-		background-color: rgba(255, 196, 0, 0.3);
-	}
-
 	:root {
 		--animation: cubic-bezier(0.05, 0.95, 0.05, 0.95);
 		scroll-behavior: smooth !important;

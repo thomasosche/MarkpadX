@@ -29,7 +29,9 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - `Ctrl+R` / `F5` to reload the current file from disk in preview mode
 - Live Mode enabled by default: auto-reloads when the file changes on disk
 - Live Mode setting persisted across sessions
-- **The reading position is kept** on reload (`F5` and auto-reload): the element at the top of the view is re-pinned to the same spot, pixel-exact, while mermaid/KaTeX/highlighting re-render. Falls back to the source line if the element moved due to an external edit. Any scroll, click or key press releases the pin
+- **The reading position is kept** on reload (`F5` and auto-reload): the element at the top of the view is re-pinned to the same spot, pixel-exact, while mermaid/KaTeX/highlighting re-render. Any scroll, click or key press releases the pin
+- External edits are followed line by line (a line diff of the old and new file): lines inserted or deleted above keep the viewed content in place, a selection in the preview survives, and if the viewed lines themselves were deleted the nearest remaining line above moves to the top. Works at every zoom level
+- In edit mode the caret, the selection and the viewed lines stay on the same text after an external change (a changed line keeps the caret; a deleted one moves it to the line above). Unsaved edits are never replaced: a notice tells you the file changed on disk, and `Ctrl+S` saves your version
 - Reloads render the full document in one pass (no truncated first pass that shrinks the page and clamps the scroll position)
 - The file watcher always follows the **active tab**, including restored sessions and tab switches, so auto-reload works right away without a first `F5`. When it switches to a file, changes made in the meantime are picked up
 - Bursts of watcher events from a single save are coalesced into one reload; an older read can never overwrite a newer one, and unchanged content is not re-rendered
@@ -52,7 +54,8 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 ### Selection Carry-over (Edit ↔ View)
 - Text selected in the rendered preview stays selected in the editor when switching to edit mode, and vice versa
 - The selection (or caret row) lands at the **same height on screen** as before the switch, instead of jumping
-- A plain caret (no selection) is carried too: its row is located in the preview and marked with a temporary highlight (cleared on the next click or key press) without changing the real selection
+- A plain caret (no selection) is carried too: its row is located in the preview and briefly glows (about one second, then fades out completely) without changing the real selection
+- Works at every zoom level; in the editor the caret line is framed by a clearly visible border (built-in light and dark themes)
 - Without a visible selection in the preview, the editor opens on the row that was at the top of the preview
 - Blank or syntax-only lines are positioned by interpolating inside their block (or the closest block above)
 - Works inside table cells and inline formatting — markdown syntax (`*`, `_`, `` ` ``, `~`, `|` …) and whitespace differences are ignored when matching

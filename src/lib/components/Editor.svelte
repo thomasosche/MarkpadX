@@ -14,6 +14,7 @@
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
 	import { byteColToIndex, indexToByteCol, IGNORED_CLASS, normalize, type SourceSelection } from '../utils/selection.js';
+	import { mapLines } from '../utils/linemap.js';
 
 	let {
 		value = $bindable(),
@@ -125,6 +126,8 @@
 					"menu.separatorBackground": "#454545",
 					"editorWidget.background": "#181818",
 					"editorWidget.border": "#454545",
+					// clearly visible frame around the caret line (same hue as the preview's caret-row marker)
+					"editor.lineHighlightBorder": "#ffc40080",
 				},
 			});
 
@@ -141,6 +144,7 @@
 					"menu.separatorBackground": "#cccccc",
 					"editorWidget.background": "#FDFDFD",
 					"editorWidget.border": "#cccccc",
+					"editor.lineHighlightBorder": "#e0a800a0",
 				},
 			});
 		};
@@ -947,10 +951,41 @@
 			}
 		} else {
 			if (editor.getValue() !== content) {
-				editor.setValue(content);
+				replaceKeepingView(content);
 			}
 		}
 	});
+
+	// Replace the whole text (e.g. the file changed on disk) but keep the caret, the selection and
+	// the viewed lines on the same content. setValue alone resets the caret to line 1, so the next
+	// key press would land at the top of the document. Deleted lines move to the nearest line above.
+	function replaceKeepingView(text: string) {
+		const oldText = editor.getValue();
+		const selections = editor.getSelections() ?? [];
+		const firstVisible = editor.getVisibleRanges()[0]?.startLineNumber ?? 1;
+		const intoFirst = editor.getScrollTop() - editor.getTopForLineNumber(firstVisible);
+
+		editor.setValue(text);
+		const model = editor.getModel();
+		if (!model) return;
+		const map = mapLines(oldText, text);
+		const toNew = (line: number, column: number) => {
+			const newLine = map.line(line);
+			return { line: newLine, column: map.status(line) !== 'deleted' ? Math.min(column, model.getLineMaxColumn(newLine)) : 1 };
+		};
+
+		if (selections.length > 0) {
+			editor.setSelections(
+				selections.map((sel) => {
+					const anchor = toNew(sel.selectionStartLineNumber, sel.selectionStartColumn);
+					const active = toNew(sel.positionLineNumber, sel.positionColumn);
+					return new monaco.Selection(anchor.line, anchor.column, active.line, active.column);
+				}),
+			);
+		}
+		const top = editor.getTopForLineNumber(map.line(firstVisible)) + (map.status(firstVisible) !== 'deleted' ? intoFirst : 0);
+		editor.setScrollTop(Math.max(0, top), monaco.editor.ScrollType.Immediate);
+	}
 
 	$effect(() => {
 		if (editor) {
