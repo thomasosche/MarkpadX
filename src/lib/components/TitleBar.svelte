@@ -26,6 +26,7 @@
 		onselectFile,
 		onnewFile,
 		onopenFile,
+		onopenFolder,
 		onsaveFile,
 		onsaveFileAs,
 		onexportHtml,
@@ -61,6 +62,7 @@
 		onselectFile?: () => void;
 		onnewFile?: () => void;
 		onopenFile?: () => void;
+		onopenFolder?: () => void;
 		onsaveFile?: () => void;
 		onsaveFileAs?: () => void;
 		onexportHtml?: () => void;
@@ -340,6 +342,17 @@
 					></svg>
 				{t('menu.openFile', currentLanguage)}
 				<span class="menu-shortcut">{modifier}+O</span>
+			</button>
+					<button
+				class="home-menu-item"
+				data-action="open-folder"
+				onclick={() => {
+					homeMenuOpen = false;
+					onopenFolder?.();
+				}}>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+				{t('menu.openFolder', currentLanguage)}
 			</button>
 					{#if currentFile !== '' || (tabManager.activeTab && tabManager.activeTab.isEditing)}
 						<button

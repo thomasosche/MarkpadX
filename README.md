@@ -66,6 +66,16 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - Rapid clicks don't fight each other — a newer click supersedes any in-flight jump
 - The pane refreshes **automatically** whenever the document content changes (tab switch, edit, reload), one frame after the new content is in the DOM, so no `F5` is needed to see an up-to-date outline
 
+### Folder pane
+- A second side pane, on the **opposite side from the outline**, lists the Markdown (`.md`) files of a folder — flat, one level, sorted by name with numbers in natural order (`2.md` before `10.md`)
+- By default it shows the folder of the **active tab** and follows tab switches; the **pin** button in the pane header keeps the current folder while you open files elsewhere
+- **⋮ → Open Folder…** picks a folder with the system dialog, pins it and opens the pane
+- Click a file to open it; a file that is already open switches to its tab. The active file is highlighted, files open in a tab are marked, and unsaved files show the same dot as their tab
+- The list refreshes on tab switch, pin/unpin, when the window regains focus, after Save / Save As into the shown folder, and with the refresh button
+- The **switch side** button in the pane header swaps folder pane and outline (same as the outline's own switch-side button)
+- Toggle it with the floating folder button or in **Settings → Appearance → Show Folder Pane**; like the outline it is always docked beside the text (never covers it), works in view, edit and split mode, and is hidden on the Recents page and in Zen mode
+- Only whether the pane is open is remembered; a pinned folder is not restored after a restart. Hidden entries, subfolders, symlinks and junctions are never listed
+
 ### Keyboard Shortcuts Dialog
 - Press `?` (or `Shift+/`) in preview mode to open a grouped reference of every keyboard shortcut (File / View / Find / Zoom / Tabs)
 - OS-aware: shows `⌘` on macOS, `Ctrl` on Windows / Linux
@@ -76,6 +86,7 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 
 ### Other tweaks
 - Build date shown in Settings → About so you can verify which build is running
+- Settings → Appearance: **Show Folder Pane** (off by default) next to the Table of Contents option
 
 <br />
 
@@ -130,7 +141,8 @@ Contributions are welcome! Markpad is built with SvelteKit and Tauri.
 3. **Run the dev server**: `npm run tauri dev`
 4. **Make your changes** and ensure type checking passes: `npm run check`
 5. **Run the unit tests**: `npm test` (Node's built-in test runner, `tests/*.test.mjs`)
-6. **Open a Pull Request**!
+6. **Run the end-to-end tests** (Windows): build the debug exe with `npx tauri build --debug --no-bundle`, close any running Markpad (single instance), then `npm run test:e2e` — or `npm run test:e2e -- folder` for one suite. The suites drive the real app over WebView2's DevTools protocol with a throw-away profile and their own fixture files; see `tests/e2e/README.md`
+7. **Open a Pull Request**!
 
 Please ensure your code follows the existing style and that you add descriptions for any new features.
 

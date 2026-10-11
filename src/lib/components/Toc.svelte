@@ -284,30 +284,6 @@
 <div class="toc-container" bind:this={tocContainer}>
 	<div class="toc-header" class:on-right={settings.tocSide === 'right'}>
 		<button 
-			class="toc-header-btn {settings.pinnedToc ? 'active' : ''}" 
-			onclick={() => { settings.togglePinnedToc(); onhideTooltip?.(); }}
-			onmouseenter={(e) => onshowTooltip?.(e, settings.pinnedToc ? t('tooltip.undock', settings.language) : t('tooltip.dock', settings.language), undefined, 'below')}
-			onmouseleave={() => onhideTooltip?.()}
-			aria-label={settings.pinnedToc ? t('tooltip.undockToc', settings.language) : t('tooltip.dockToc', settings.language)}>
-			{#if settings.tocSide === 'left'}
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-					<rect width="18" height="18" x="3" y="3" rx="2" />
-					<path d="M9 3v18" />
-					{#if !settings.pinnedToc}
-						<path d="m14 9-3 3 3 3" />
-					{/if}
-				</svg>
-			{:else}
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-					<rect width="18" height="18" x="3" y="3" rx="2" />
-					<path d="M15 3v18" />
-					{#if !settings.pinnedToc}
-						<path d="m10 9 3 3-3 3" />
-					{/if}
-				</svg>
-			{/if}
-		</button>
-		<button 
 			class="toc-header-btn" 
 			onclick={() => { settings.toggleTocSide(); onhideTooltip?.(); }}
 			onmouseenter={(e) => onshowTooltip?.(e, t('tooltip.switchSide', settings.language), undefined, 'below')}

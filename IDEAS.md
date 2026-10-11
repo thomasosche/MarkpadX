@@ -170,3 +170,141 @@ With many open files the strip truncates titles and needs scroll arrows; a verti
 - Should a scroll in the preview that keeps the carried row visible still count as "same place", or should any scroll switch back to the top-row rule?
 - When the user clicks in the preview without selecting text (caret only), should that click define the return row, or keep the stored editor caret?
 - Keep the stored position across a live reload when the row survived the line map, or always fall back to the top row after an external change?
+
+---
+
+## I-05 · Folder pane: Markdown files of the folder, opposite the outline
+
+- **Status:** done (2026-10-11) — implemented as planned, with these changes from the owner's test: no close (X) button in the pane header (the floating toggle closes it), a switch-side button instead, and the dock/undock option removed for both side panes (always docked). Tests: `tests/folderPane.test.mjs`, Rust unit tests in `src-tauri/src/folder.rs`, E2E `tests/e2e/folder.mjs` (11 checks).
+- **Added:** 2026-10-11 (requested by the owner; inspired by upstream PR [sftwrdotdev/Markpad#964](https://github.com/sftwrdotdev/Markpad/pull/964))
+
+**What**
+- A second sidebar pane on the opposite side from the outline (TOC). It lists the Markdown files of a folder; clicking one opens it as a tab.
+- The outline stays where it is (`tocSide`), and the folder pane takes the other side.
+
+**Why**
+Notes and tech-file folders hold many related `.md` files. Today you open them one by one through the file dialog or links; a folder pane shows the neighbours of the current file at a glance.
+
+**Reference: how upstream PR #964 does it** (open, **not merged**; upstream declined a folder tree before, #149)
+- **Folder selection:** an **Open Folder** entry in the main (⋮) menu opens the system folder picker (`open({ directory: true, multiple: false })`). No shortcut (`Ctrl+Shift+O` is taken by Monaco). A **Close Folder** button sits in the pane header. One folder per window.
+- **Persistence:** the folder path is stored in `localStorage` (`folder.lastRoot`) on open and cleared on close. Only the main window restores it at start-up; a folder that no longer exists is dropped quietly. Expanded subfolders are not remembered. Side, stack order, "Show all files", divider position and column width are settings.
+- **Tree:** reads one level per expand and watches only expanded folders, non-recursively, coalesced over 200 ms. By default it lists only the files Markpad opens; "Show all files" lists the rest dimmed and opens them with the system app (launchable files are revealed, never run).
+- **Security:** on Windows, symlinks and junctions are not listed, so expanding a folder can never make Windows offer NTLM credentials to a UNC host.
+- **Size:** about 1,270 lines over 16 files. It is stacked on PR #963 (tabs in a side column) and uses upstream-only modules (`app.rs`, `window_runtime.rs`, `coalesced`, `openWithSystem`, the shared extension list). **Not portable to the current fork base**; realistic only after the I-03 rebase, and only if upstream merges it.
+
+**Notes: simple version for the current code base** (about half a day, 300–400 lines)
+- **Rust:** one command that lists one folder level: Markdown files sorted by name, hidden entries skipped, symlinks/junctions skipped on Windows (same reasoning as #964). Unit test.
+- **`FolderFiles.svelte`:** flat list. The active file is highlighted, files open in a tab are marked, a click opens the file like a link does (one tab per path).
+- **Placement:** mirror the outline's existing wrapper (overlay/pinned, width, fly transition, Zen mode hides it) on the side opposite `tocSide`. Mostly CSS in `MarkdownViewer.svelte`.
+- **Toggle:** a floating button like the outline's, plus a setting (off by default).
+- **Refresh:** on file open, tab switch and window focus, plus a refresh button. Optional later: a non-recursive directory watcher.
+- **Tests:** E2E with the isolated profile: list shown, click opens, pane is on the other side from the outline, a file added on disk appears after a refresh.
+
+**Spec decisions (owner, 2026-10-11)**
+- **Folder:** both. By default the pane shows the folder of the active tab and follows tab switches; a **pin** button keeps the current folder fixed while you open files elsewhere. An Open Folder entry in the ⋮ menu (system folder picker) pins a chosen folder.
+- **Structure:** flat list, one folder level, no subfolders.
+- **Files:** `.md` only.
+- **Remembered for the next session:** only whether the pane is open. A pinned folder is **not** restored; after a restart the pane follows the current file again.
+- **Estimate with these decisions:** about 0.75 day (the pin and Open Folder add a few hours to the simple version above).
+
+**Still open**
+- **Sorting and extras:** by name only, or also by modification date? Show the date? Filter box?
+- **Live update:** refresh on file open / tab switch / window focus plus a refresh button, or also watch the folder for new and deleted files while the pane is open?
+- **Go / no-go:** pending the owner's decision.
+
+**Implementation plan (draft 2026-10-11, for the go / no-go decision)**
+
+*Assumptions for the points still open; change them before the go if needed:*
+- **A1 · Sorting:** by file name only, case-insensitive with numbers in natural order (`2.md` before `10.md`). No date column, no filter box.
+- **A2 · Refresh:** when the folder changes (tab switch, pin/unpin), when the window regains focus, after Save / Save As, and with a refresh button. No directory watcher.
+- **A3 · Open Folder:** an entry in the ⋮ menu opens the system folder picker and pins the chosen folder.
+- **A4 · Pane behaviour:** overlay vs. pinned follows the outline's existing **Pin** setting, so both panes behave alike. The pane is available in view, edit and split mode; hidden on the Home/Recents page and in Zen mode.
+
+*Steps*
+1. **Rust: `src-tauri/src/folder.rs`, command `list_markdown_files(dir)`.**
+   - Reads one level with `read_dir` and returns `{ name, path }` for regular files with the extension `.md` (case-insensitive).
+   - Skips hidden entries (leading `.`), subfolders and all other file types.
+   - Never follows links: the entry type comes from `read_dir`'s own records. On Windows, symlinks and junctions (reparse points) are left out, so a listing can never make Windows offer NTLM credentials to a UNC host (the reason given in upstream #876 / #964).
+   - Sorts by name, case-insensitive and natural.
+   - Errors for a missing path or a path that is not a folder.
+   - Registered in `lib.rs`.
+2. **Pure helpers `src/lib/utils/folderPane.ts`:**
+   - `dirname(path)` for `\` and `/`, drive roots and UNC paths.
+   - `samePath(a, b)`: case-insensitive on Windows, ignores separator style.
+   - `paneFolder(pinned, activeTabPath)`: the pinned folder, otherwise the active file's folder; null for untitled tabs and the Home page.
+3. **Store `src/lib/stores/folderPane.svelte.ts`:**
+   - State: `pinned`, `folder` (derived), `files`, `error`, `loading`.
+   - Methods: `refresh()` with a sequence guard (a slower old listing cannot overwrite a newer one), `pin()`, `unpin()`, `openFolder()` (dialog → pin).
+   - The pinned folder lives in memory only, so it is not restored after a restart (spec).
+4. **Settings (`settings.svelte.ts`):**
+   - `showFolderPane`, persisted as `editor.showFolderPane`, default off.
+   - Included in the Zen-mode save/restore like `showToc`.
+   - Checkbox in Settings → Appearance.
+5. **UI `src/lib/components/FolderPane.svelte`:**
+   - **Header:** folder name, full path as tooltip, pin/unpin, refresh and close buttons.
+   - **Rows:** file name, the active file highlighted, files already open in a tab marked (their unsaved dot shown as in the tab).
+   - **Empty and error states:** "No Markdown files", "Folder not available".
+   - **Click:** opens the file through `loadMarkdown`, which already switches to an existing tab instead of opening a duplicate.
+6. **Placement in `MarkdownViewer.svelte`:**
+   - A second wrapper mirroring `toc-overlay-wrapper`, on the opposite side from `settings.tocSide`: same width, fly transition, overlay/pinned styles.
+   - A floating toggle button mirroring `toc-toggle-floating`.
+   - Layout classes `has-pinned-folder` / `folder-on-left` / `folder-on-right`, so a pinned pane never covers the editor or the preview text.
+7. **Menu (`TitleBar.svelte`):** "Open Folder…" in the ⋮ menu (`onopenFolder`), below Open File; also turns the pane on.
+8. **Refresh triggers (`MarkdownViewer.svelte`):** effect on `folderPane.folder`; `onFocusChanged` → refresh when focused and the pane is shown; after `saveContent` / `saveContentAs` when the saved file is in the shown folder.
+9. **i18n:** new keys in en + de; other languages fall back to English. Covers the title, pin, unpin, Open Folder, refresh, close, empty, not available, and the show/hide tooltips.
+10. **Docs:** README section "Folder pane"; I-05 status → done.
+
+*Tests*
+- **Rust unit tests (`cargo test`, in `folder.rs`, temp folders with std only):**
+  - only `.md` / `.MD` listed; `.markdown`, `.txt`, subfolders and hidden files left out
+  - natural, case-insensitive order
+  - one level only (a file in a subfolder is not listed)
+  - a missing path and a file path return errors
+  - Windows: a junction (created with `mklink /J`, no admin rights needed) and, where the runner may create it, a symlink are left out; the symlink test skips itself if it can't be created
+- **Node unit tests (`tests/folderPane.test.mjs`, `npm test`):**
+  - `dirname` for `C:\a\b.md`, `/a/b.md`, `\\server\share\x.md` and drive roots
+  - `samePath` with mixed case and separators
+  - `paneFolder`: pinned wins; untitled tab and Home page give null; follows the active path when unpinned
+- **E2E (`folder.mjs`, same harness as the other suites: debug build, throw-away WebView2 profile, own fixture folder, safety stop for non-fixture files):**
+  - **Fixture folder:** `a.md`, `B.md`, `2.md`, `10.md`, `notes.txt`, `.hidden.md`, `sub/c.md`, a junction `link/` to another fixture folder; a second folder `other/` with `x.md`.
+  1. Pane off by default; the toggle shows it on the side opposite the outline; switching the outline side moves the pane to the other side.
+  2. The list shows exactly `2.md, 10.md, a.md, B.md`.
+  3. The active file is highlighted; clicking `a.md` opens it; clicking an already open file switches to its tab, so the tab count stays the same.
+  4. Opening `other/x.md` (tab switch) → the list follows to `other/`.
+  5. Pin, switch tabs → the list stays; unpin → it follows again.
+  6. A new `new.md` on disk is not shown until a trigger; tab switch and the refresh button show it.
+  7. Saving a file into the shown folder (Save) refreshes the list.
+  8. Folder renamed while shown → "Folder not available", no crash; the next refresh after restoring works.
+  9. Restart with the same profile: the pane is open again; a previously pinned folder is not restored (follows the current file).
+  10. Pinned pane in edit and split mode does not overlap the editor or the preview (rect check); at 200 % zoom the list stays clickable.
+  11. No console errors; the app is still running.
+- **Regression:** the existing suites (main end-to-end, carry-over, auto reload, unit tests) must stay green.
+- **Manual checks (not automatable over CDP):** the native folder picker (Open Folder), refresh on window focus, a folder on a network share.
+
+*Estimate:* about 1–1.25 days. Implementation ~0.75 day, tests ~0.25–0.5 day.
+
+*Before starting:* the E2E harness currently lives only in a scratch folder. Moving it into the repo first (`tests/e2e/`, `npm run test:e2e`) is recommended, so the new suite and the existing ones are kept and can be re-run.
+
+**Plan review (2026-10-11): robustness and usability improvements, in scope of the change**
+
+*Robustness*
+- **R1 · Filter on `is_file()` instead of hand-written reparse-point checks.** `DirEntry::file_type()` from `read_dir` never follows links; on Windows Rust's `is_file()` is false for symlinks and junctions but true for OneDrive/Dropbox on-demand placeholders. One check covers all platforms, no `cfg(windows)` branch, and placeholders on synced folders still appear. Keep the junction unit test to prove it. Never call `metadata()` on an entry, since that follows the link.
+- **R2 · Skip unreadable entries rather than failing the listing.** The existing `list_directory_contents` in `lib.rs` aborts on the first bad entry. A locked file on a share must not blank the whole pane.
+- **R3 · Make the command `async`.** Sync Tauri commands run on the main thread; listing a UNC folder can stall for seconds, and the pane refreshes on every window focus. Add a small throttle on the focus trigger (skip if the last refresh was under 1 s ago) on top of the sequence guard.
+- **R4 · Share the path normaliser with `loadMarkdown`.** `loadMarkdown` already has an inline `norm` closure for the one-tab-per-path check. Move it into `folderPane.ts` and reuse it there, so "already open" marks and tab de-duplication can never disagree.
+- **R5 · Missing refresh triggers:** in-app rename (`menu-tab-rename` → `rename_file`) and the `navigate: true` path of `loadMarkdown` both change what the list should show. Simplest rule: refresh after any Save, Save As or rename, without a "is it in the shown folder" check.
+- **R6 · Click on a vanished file:** if `loadMarkdown` throws because the file was deleted after listing, show the toast and refresh the list.
+- **R7 · Two pinned panes:** `isOverhanging` accounts for one 240 px pane. With outline and folder pane both pinned, the centred preview needs 480 px of padding, otherwise the overlay test gives the wrong answer and text gets covered.
+- **R8 · Sort in TypeScript, not Rust.** `new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })` gives natural, case-insensitive, locale-aware order in one line. Rust returns names unsorted; this drops ~30 lines of Rust plus their tests (A1 unchanged in effect).
+- **R9 · No per-row transitions.** The outline uses `transition:slide` per item; a tech-file folder with several hundred `.md` files would jank on every refresh. Key the `{#each}` by path and assign `files` only when the listing actually changed, so scroll position survives a refresh. Show the loading state only when there is no list yet (no spinner flicker on refresh).
+
+*Usability*
+- **U1 · Untitled tab or Home: keep the last folder.** `paneFolder` returning null for untitled tabs means New File empties the pane. A sticky last folder is less surprising.
+- **U2 · Empty state with a call to action.** When no folder can be shown, offer an "Open Folder…" button in the pane itself, not only in the ⋮ menu.
+- **U3 · Error state when pinned offers Unpin.** Otherwise a renamed pinned folder leaves the user stuck on "Folder not available".
+- **U4 · Header folder name opens Explorer.** The `open_file_folder` command already exists; one click on the folder name reveals the folder. Full path as tooltip, as planned.
+- **U5 · Rows as `<button>` elements.** Gives Tab/Enter navigation and screen-reader support for free. Long names get CSS ellipsis with the full name as tooltip.
+- **U6 · Extension list (owner's call, changes a spec decision).** The spec says `.md` only, but the app itself treats `md, markdown, mdown, mkd` as Markdown. Reusing that constant costs nothing and avoids "why is my `.markdown` file missing".
+
+*Design note for later*
+- `watch_file` keeps a single watcher slot that is replaced per active tab. A folder watcher would need its own slot in `WatcherState`. No watcher for v1 (A2), but write `refresh()` so a future `folder-changed` event just calls it.

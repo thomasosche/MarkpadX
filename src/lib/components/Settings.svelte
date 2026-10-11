@@ -617,6 +617,13 @@
 								<span class="toggle-slider"></span>
 							</label>
 						</div>
+						<div class="setting-item">
+							<label for="appearance-folder-pane">{t('settings.showFolderPane', settings.language)}</label>
+							<label class="toggle">
+								<input id="appearance-folder-pane" type="checkbox" checked={settings.showFolderPane} onchange={() => settings.toggleFolderPane()} />
+								<span class="toggle-slider"></span>
+							</label>
+						</div>
 
 						<div class="setting-item">
 							<label for="appearance-highlight-color">{t('settings.highlightColor', settings.language)}</label>

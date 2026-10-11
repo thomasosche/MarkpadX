@@ -11,6 +11,7 @@ struct WatcherState {
     watcher: Mutex<Option<RecommendedWatcher>>,
 }
 
+mod folder;
 mod setup;
 
 #[tauri::command]
@@ -929,7 +930,8 @@ pub fn run() {
             delete_file,
             copy_file,
             cleanup_empty_img_dir,
-            list_directory_contents
+            list_directory_contents,
+            folder::list_markdown_files
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

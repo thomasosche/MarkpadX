@@ -136,6 +136,7 @@ export class SettingsStore {
 	restoreStateOnReopen = $state(true);
 	zenMode = $state(false);
 	showToc = $state(false);
+	showFolderPane = $state(false);
 	preZenState = $state<{
 		renderLineHighlight: string;
 		showTabs: boolean;
@@ -143,12 +144,13 @@ export class SettingsStore {
 		minimap: boolean;
 		lineNumbers: string;
 		showToc: boolean;
+		// optional: states saved before the folder pane existed lack it
+		showFolderPane?: boolean;
 	} | null>(null);
 	occurrencesHighlight = $state(false);
 	showWhitespace = $state(false);
 	startInEditor = $state(false);
 	editorMaxWidth = $state(80);
-	pinnedToc = $state(false);
 	tocSide = $state<'left' | 'right'>('left');
 	osType = $state<OSType>('unknown');
 	imageDirectory = $state('img');
@@ -179,10 +181,10 @@ export class SettingsStore {
 			const savedOccurrencesHighlight = localStorage.getItem('editor.occurrencesHighlight');
 			const savedShowWhitespace = localStorage.getItem('editor.showWhitespace');
 			const savedShowToc = localStorage.getItem('editor.showToc');
+			const savedShowFolderPane = localStorage.getItem('editor.showFolderPane');
 			const savedHighlightColor = localStorage.getItem('editor.highlightColor');
 			const savedStartInEditor = localStorage.getItem('editor.startInEditor');
 			const savedEditorMaxWidth = localStorage.getItem('editor.maxWidth');
-			const savedPinnedToc = localStorage.getItem('editor.pinnedToc');
 			const savedTocSide = localStorage.getItem('editor.tocSide');
 			const savedImageDirectory = localStorage.getItem('editor.imageDirectory');
 			const savedMacosImageScaling = localStorage.getItem('editor.macosImageScaling');
@@ -216,10 +218,10 @@ export class SettingsStore {
 			if (savedOccurrencesHighlight !== null) this.occurrencesHighlight = savedOccurrencesHighlight === 'true';
 			if (savedShowWhitespace !== null) this.showWhitespace = savedShowWhitespace === 'true';
 			if (savedShowToc !== null) this.showToc = savedShowToc === 'true';
+			if (savedShowFolderPane !== null) this.showFolderPane = savedShowFolderPane === 'true';
 			if (savedHighlightColor !== null) this.highlightColor = savedHighlightColor;
 			if (savedStartInEditor !== null) this.startInEditor = savedStartInEditor === 'true';
 			if (savedEditorMaxWidth !== null) this.editorMaxWidth = parseFontSize(savedEditorMaxWidth, 80, 20, 500);
-			if (savedPinnedToc !== null) this.pinnedToc = savedPinnedToc === 'true';
 			if (savedTocSide !== null) this.tocSide = savedTocSide as 'left' | 'right';
 			if (savedImageDirectory !== null) this.imageDirectory = savedImageDirectory;
 			if (savedMacosImageScaling !== null) this.macosImageScaling = savedMacosImageScaling === 'true';
@@ -281,10 +283,10 @@ export class SettingsStore {
 					localStorage.setItem('editor.occurrencesHighlight', String(this.occurrencesHighlight));
 					localStorage.setItem('editor.showWhitespace', String(this.showWhitespace));
 					localStorage.setItem('editor.showToc', String(this.showToc));
+					localStorage.setItem('editor.showFolderPane', String(this.showFolderPane));
 					localStorage.setItem('editor.highlightColor', this.highlightColor);
 					localStorage.setItem('editor.startInEditor', String(this.startInEditor));
 					localStorage.setItem('editor.maxWidth', String(this.editorMaxWidth));
-					localStorage.setItem('editor.pinnedToc', String(this.pinnedToc));
 				  localStorage.setItem('editor.tocSide', this.tocSide);
 				  localStorage.setItem('editor.imageDirectory', this.imageDirectory);
 				  localStorage.setItem('editor.macosImageScaling', String(this.macosImageScaling));
@@ -357,6 +359,7 @@ export class SettingsStore {
 				minimap: this.minimap,
 				lineNumbers: this.lineNumbers,
 				showToc: this.showToc,
+				showFolderPane: this.showFolderPane,
 			};
 			this.renderLineHighlight = 'none';
 			this.showTabs = false;
@@ -364,6 +367,7 @@ export class SettingsStore {
 			this.minimap = false;
 			this.lineNumbers = 'off';
 			this.showToc = false;
+			this.showFolderPane = false;
 		} else {
 			if (this.preZenState) {
 				this.renderLineHighlight = this.preZenState.renderLineHighlight;
@@ -372,6 +376,7 @@ export class SettingsStore {
 				this.minimap = this.preZenState.minimap;
 				this.lineNumbers = this.preZenState.lineNumbers;
 				this.showToc = this.preZenState.showToc;
+				this.showFolderPane = this.preZenState.showFolderPane ?? false;
 				this.preZenState = null;
 			}
 		}
@@ -379,6 +384,10 @@ export class SettingsStore {
 
 	toggleToc() {
 		this.showToc = !this.showToc;
+	}
+
+	toggleFolderPane() {
+		this.showFolderPane = !this.showFolderPane;
 	}
 
 	toggleOccurrencesHighlight() {
@@ -391,10 +400,6 @@ export class SettingsStore {
 
 	toggleStartInEditor() {
 		this.startInEditor = !this.startInEditor;
-	}
-
-	togglePinnedToc() {
-		this.pinnedToc = !this.pinnedToc;
 	}
 
 	toggleTocSide() {

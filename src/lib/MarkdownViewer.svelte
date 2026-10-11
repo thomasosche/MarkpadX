@@ -15,6 +15,7 @@
 	import Modal from './components/Modal.svelte';
 	import ContextMenu, { type ContextMenuItem } from './components/ContextMenu.svelte';
 	import Toc from './components/Toc.svelte';
+	import FolderPane from './components/FolderPane.svelte';
 	import Toast from './components/Toast.svelte';
 	import { exportAsHtml as _exportHtml, exportAsPdf } from './utils/export';
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
@@ -39,6 +40,8 @@ import { mapLines, type LineMapping } from './utils/linemap.js';
 	import Shortcuts from './components/Shortcuts.svelte';
 import { tabManager } from './stores/tabs.svelte.js';
 import { settings } from './stores/settings.svelte.js';
+import { folderPane } from './stores/folderPane.svelte.js';
+import { dirname, samePath } from './utils/folderPane.js';
 import { t } from './utils/i18n.js';
 
 	// syntax highlighting & latex
@@ -152,12 +155,35 @@ import { t } from './utils/i18n.js';
 	let showHome = $state(false);
 	let isFullWidth = $state(localStorage.getItem('isFullWidth') === 'true');
 	let viewerWidth = $state(0);
-	const TOC_WIDTH = 240;
-	let isOverhanging = $derived(isFullWidth || (viewerWidth > 0 && TOC_WIDTH > Math.max(50, (viewerWidth - 780) / 2)));
 
 	$effect(() => {
 		localStorage.setItem('isFullWidth', String(isFullWidth));
 	});
+
+	// the folder pane takes the side opposite the outline
+	let folderSide = $derived<'left' | 'right'>(settings.tocSide === 'left' ? 'right' : 'left');
+	let folderPaneVisible = $derived(settings.showFolderPane && !settings.zenMode);
+
+	$effect(() => {
+		const path = currentFile && currentFile !== 'HOME' ? currentFile : null;
+		// setActivePath reads and writes store state; keep it out of this effect's dependencies
+		untrack(() => folderPane.setActivePath(path));
+	});
+
+	// folder contents may have changed on disk while the pane was closed
+	$effect(() => {
+		if (folderPaneVisible) untrack(() => folderPane.refresh());
+	});
+
+	async function openFolder() {
+		const picked = await folderPane.openFolder();
+		if (picked) settings.showFolderPane = true;
+	}
+
+	function refreshFolderPaneAfterSave(savedPath: string) {
+		const dir = dirname(savedPath);
+		if (dir && folderPane.folder && samePath(dir, folderPane.folder)) folderPane.refresh();
+	}
 
 	import { parseAndApplyVscodeTheme, clearVscodeTheme } from './utils/theme';
 
@@ -350,6 +376,21 @@ import { t } from './utils/i18n.js';
 
 	// ui state
 	let tooltip = $state({ show: false, text: '', shortcut: '', html: '', isFootnote: false, x: 0, y: 0, align: 'top' as 'top' | 'right' | 'left' | 'below' });
+
+	function showPaneTooltip(e: MouseEvent, text: string, shortcut?: string, align: 'top' | 'right' | 'left' | 'below' = 'top') {
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const beside = align === 'right' || align === 'left';
+		tooltip = {
+			show: true,
+			text,
+			shortcut: shortcut || '',
+			html: '',
+			isFootnote: false,
+			x: align === 'right' ? rect.right + 8 : align === 'left' ? rect.left - 8 : rect.left + rect.width / 2,
+			y: beside ? rect.top + rect.height / 2 : align === 'below' ? rect.bottom + 8 : rect.top - 8,
+			align
+		};
+	}
 	let caretEl: HTMLElement;
 	let caretAbsoluteTop = 0;
 	let modalState = $state<{
@@ -2037,6 +2078,7 @@ import { t } from './utils/i18n.js';
 			}
 			tab.isDirty = false;
 			tab.originalContent = tab.rawContent;
+			refreshFolderPaneAfterSave(targetPath);
 			return true;
 		} catch (e) {
 			console.error('Failed to save file', e);
@@ -2064,6 +2106,7 @@ import { t } from './utils/i18n.js';
 				saveRecentFile(selected);
 				tab.isDirty = false;
 				tab.originalContent = tab.rawContent;
+				refreshFolderPaneAfterSave(selected);
 				return true;
 			} catch (e) {
 				console.error('Failed to save file as', e);
@@ -2823,6 +2866,8 @@ import { t } from './utils/i18n.js';
 			unlisteners.push(
 				await appWindow.onFocusChanged(({ payload: focused }) => {
 					isFocused = focused;
+					// files may have been added or removed outside the app
+					if (focused && settings.showFolderPane) folderPane.refresh();
 				}),
 			);
 			unlisteners.push(
@@ -3072,6 +3117,7 @@ import { t } from './utils/i18n.js';
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onopenFolder={openFolder}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onexportHtml={exportAsHtml}
@@ -3113,6 +3159,7 @@ import { t } from './utils/i18n.js';
 		onselectFile={selectFile}
 		onnewFile={handleNewFile}
 		onopenFile={selectFile}
+		onopenFolder={openFolder}
 		onsaveFile={saveContent}
 		onsaveFileAs={saveContentAs}
 		onexportHtml={exportAsHtml}
@@ -3149,9 +3196,12 @@ import { t } from './utils/i18n.js';
 				<div class="layout-container" 
 					class:split={isSplit} 
 					class:editing={isEditing} 
-					class:has-pinned-toc={isMarkdown && settings.pinnedToc && settings.showToc}
+					class:has-pinned-toc={isMarkdown && settings.showToc}
 					class:toc-on-left={isMarkdown && settings.tocSide === 'left'}
-					class:toc-on-right={isMarkdown && settings.tocSide === 'right'}>
+					class:toc-on-right={isMarkdown && settings.tocSide === 'right'}
+					class:has-pinned-folder={folderPaneVisible}
+					class:folder-on-left={folderSide === 'left'}
+					class:folder-on-right={folderSide === 'right'}>
 					<!-- Editor Pane -->
 					<div bind:this={editorPaneEl} class="pane editor-pane" class:active={isEditing || isSplit} style="flex: {isSplit ? tabManager.activeTab.splitRatio : isEditing ? 1 : 0}">
 						{#if isEditing || isSplit}
@@ -3279,8 +3329,7 @@ import { t } from './utils/i18n.js';
 							<div 
 								transition:fly={{ x: settings.tocSide === 'left' ? -240 : 240, duration: 300, opacity: 1, easing: cubicOut }}
 								class="toc-overlay-wrapper" 
-								class:is-overhanging={isOverhanging} 
-								class:is-pinned={settings.pinnedToc}
+								class:is-pinned={true}
 								class:on-right={settings.tocSide === 'right'}>
 								<Toc 
 										{markdownBody} 
@@ -3327,6 +3376,51 @@ import { t } from './utils/i18n.js';
 										}}
 										onhideTooltip={() => tooltip.show = false}
 								/>
+							</div>
+						{/if}
+					{/if}
+
+					<!-- Folder pane: mirrors the outline on the opposite side -->
+					{#if !settings.zenMode}
+						<div class="top-fade-mask" style="{folderSide === 'left' ? 'left: 0;' : 'right: 0; left: auto;'}"></div>
+						<button
+							class="folder-toggle-floating"
+							class:expanded={folderPaneVisible}
+							class:on-right={folderSide === 'right'}
+							class:in-edit-mode={isEditing && !folderPaneVisible}
+							onclick={() => { settings.toggleFolderPane(); tooltip.show = false; }}
+							aria-label={folderPaneVisible ? t('folderPane.hide', settings.language) : t('folderPane.show', settings.language)}
+							onmouseenter={(e) => {
+								const rect = e.currentTarget.getBoundingClientRect();
+								tooltip = {
+									show: true,
+									text: folderPaneVisible ? t('folderPane.hide', settings.language) : t('folderPane.show', settings.language),
+									shortcut: '',
+									html: '',
+									isFootnote: false,
+									x: folderSide === 'left' ? rect.right + 8 : rect.left - 8,
+									y: rect.top + rect.height / 2,
+									align: folderSide === 'left' ? 'right' : 'left'
+								};
+							}}
+							onmouseleave={() => tooltip.show = false}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+							</svg>
+						</button>
+
+						{#if folderPaneVisible}
+							<div
+								transition:fly={{ x: folderSide === 'left' ? -240 : 240, duration: 300, opacity: 1, easing: cubicOut }}
+								class="folder-pane-wrapper"
+								class:is-pinned={true}
+								class:on-left={folderSide === 'left'}
+								class:on-right={folderSide === 'right'}>
+								<FolderPane
+									side={folderSide}
+									onopen={(path: string) => loadMarkdown(path)}
+									onshowTooltip={showPaneTooltip}
+									onhideTooltip={() => (tooltip.show = false)} />
 							</div>
 						{/if}
 					{/if}
@@ -3913,16 +4007,6 @@ import { t } from './utils/i18n.js';
 		border-right-color: var(--color-border-default);
 	}
 
-	.toc-overlay-wrapper.is-overhanging:not(.is-pinned) {
-		border-right-color: var(--color-border-default);
-		box-shadow: 10px 0 30px rgba(0, 0, 0, 0.12);
-	}
-	
-	.toc-overlay-wrapper.is-overhanging.on-right:not(.is-pinned) {
-		border-left-color: var(--color-border-default);
-		box-shadow: -10px 0 30px rgba(0, 0, 0, 0.12);
-	}
-
 	.toc-toggle-floating {
 		position: absolute;
 		top: 48px;
@@ -4028,6 +4112,115 @@ import { t } from './utils/i18n.js';
 	}
 
 	.toc-toggle-floating.in-edit-mode:not(.expanded) {
+		background-color: var(--color-canvas-default);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		border: 1px solid var(--color-border-default);
+		opacity: 0.9;
+		backdrop-filter: blur(8px);
+		-webkit-backdrop-filter: blur(8px);
+	}
+
+	/* Folder pane: same geometry as the outline wrapper, on the opposite side */
+	.folder-pane-wrapper {
+		position: absolute;
+		top: 36px;
+		left: 0;
+		bottom: 0;
+		width: 240px;
+		height: calc(100% - 36px);
+		z-index: 1000;
+		background-color: var(--color-canvas-default);
+		border-right: 1px solid transparent;
+		border-left: 1px solid transparent;
+		box-shadow: 10px 0 30px rgba(0, 0, 0, 0);
+		transition: box-shadow 0.3s ease, border-color 0.3s ease, left 0.3s ease, right 0.3s ease;
+	}
+
+	.folder-pane-wrapper.on-right {
+		left: auto;
+		right: 0;
+	}
+
+	.folder-pane-wrapper.is-pinned {
+		z-index: 10;
+		box-shadow: none !important;
+	}
+
+	.folder-pane-wrapper.is-pinned.on-left,
+	.layout-container.editing .folder-pane-wrapper.on-left {
+		border-right-color: var(--color-border-default);
+	}
+
+	.folder-pane-wrapper.is-pinned.on-right,
+	.layout-container.editing .folder-pane-wrapper.on-right {
+		border-left-color: var(--color-border-default);
+	}
+
+	.layout-container.has-pinned-folder.folder-on-left {
+		padding-left: 240px;
+	}
+
+	.layout-container.has-pinned-folder.folder-on-right {
+		padding-right: 240px;
+	}
+
+	.layout-container.editing.has-pinned-folder.folder-on-left .editor-pane {
+		padding-left: 40px;
+	}
+
+	.layout-container.editing.has-pinned-folder.folder-on-right .editor-pane {
+		padding-right: 40px;
+	}
+
+	.folder-toggle-floating {
+		position: absolute;
+		top: 48px;
+		left: 8px;
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background-color: transparent;
+		border: none;
+		border-radius: 4px;
+		color: var(--color-fg-muted);
+		cursor: pointer;
+		z-index: 1001;
+		transition:
+			left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+			right 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+			background-color 0.2s ease,
+			color 0.2s ease,
+			opacity 0.2s ease;
+		opacity: 0.6;
+		padding: 0;
+	}
+
+	.folder-toggle-floating.expanded {
+		left: 24px;
+		color: var(--color-fg-default);
+	}
+
+	.folder-toggle-floating.on-right {
+		left: auto;
+		right: 8px;
+	}
+
+	.folder-toggle-floating.on-right.expanded {
+		right: 24px;
+	}
+
+	.layout-container:hover .folder-toggle-floating,
+	.folder-toggle-floating:hover {
+		opacity: 1;
+	}
+
+	.folder-toggle-floating:active {
+		background-color: var(--color-border-muted);
+	}
+
+	.folder-toggle-floating.in-edit-mode:not(.expanded) {
 		background-color: var(--color-canvas-default);
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 		border: 1px solid var(--color-border-default);
