@@ -1,7 +1,7 @@
 <div align="center">
   <img src="src-tauri/icons/128x128.png" width="128" alt="MarkpadX Icon" />
   <h1>MarkpadX</h1>
-  <p><b>A personal fork of <a href="https://github.com/alecdotdev/Markpad">Markpad</a> with additional features.</b></p>
+  <p><b>A personal fork of <a href="https://github.com/sftwrdotdev/Markpad">Markpad</a> with additional features.</b></p>
   <p>This is not an official release — it is intended to be built from source only.</p>
 </div>
 
@@ -113,8 +113,13 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 
 - Clone the repository
 - Run `npm install` to install dependencies
-- Run `npm run tauri build` to build the executable
-- [Optional] Rename to `MarkpadInstaller.exe` to run as installer
+- Run `npm run build` and then `npx tauri build --no-bundle` to build only the executable (`src-tauri/target/release/Markpad.exe`); this is the intended way to use MarkpadX
+- `npm run tauri build` (or `release.ps1`) additionally produces the MSI/NSIS installers; the exe can be renamed to `MarkpadInstaller.exe` to run as installer
+- `build.ps1` makes a debug build and closes running Markpad instances first
+
+## Ideas and planned work
+
+Ideas that are not scheduled yet live in [`IDEAS.md`](IDEAS.md), one entry per idea with what it should do, why, notes on how it could be built and the open questions. It also holds the plan for re-basing MarkpadX on the current upstream release, including the list of fork features that need to be carried over afterwards.
 
 ## Contributing
 
@@ -124,6 +129,9 @@ Contributions are welcome! Markpad is built with SvelteKit and Tauri.
 2. **Install dependencies**: `npm install`
 3. **Run the dev server**: `npm run tauri dev`
 4. **Make your changes** and ensure type checking passes: `npm run check`
-5. **Open a Pull Request**!
+5. **Run the unit tests**: `npm test` (Node's built-in test runner, `tests/*.test.mjs`)
+6. **Open a Pull Request**!
 
 Please ensure your code follows the existing style and that you add descriptions for any new features.
+
+Upstream: this fork tracks [sftwrdotdev/Markpad](https://github.com/sftwrdotdev/Markpad) (git remote `upstream`). The last merged upstream version is 2.6.5; see `IDEAS.md` I-03 for the state of the sync.
