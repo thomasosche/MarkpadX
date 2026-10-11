@@ -6,9 +6,9 @@
 #   cargo install cyclonedx-bom
 #
 # Configuration via .env.local:
-#   DT_URL=https://dt.carrybit.de
+#   DT_URL=https://<your-dependency-track-host>
 #   DT_API_KEY=<your token>
-#   DT_PROJECT_ID=<markpadx project uuid from dt.carrybit.de>
+#   DT_PROJECT_ID=<markpadx project uuid from your Dependency Track>
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
