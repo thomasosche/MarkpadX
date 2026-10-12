@@ -278,7 +278,10 @@ import { t } from './utils/i18n.js';
 		previewSearchHighlights = [];
 	}
 
-	function performPreviewSearch() {
+	// keepIndex: re-highlight after the preview HTML was replaced (tab switch, reload, rich render)
+	// and keep the current match without scrolling to it, so the reading position is not touched
+	function performPreviewSearch(keepIndex = false) {
+		const previousIndex = previewSearchCurrentIndex;
 		clearPreviewSearchHighlights();
 		previewSearchMatches = [];
 		previewSearchCurrentIndex = -1;
@@ -321,20 +324,82 @@ import { t } from './utils/i18n.js';
 		}
 
 		previewSearchMatches = ranges;
-		if (ranges.length > 0) {
+		if (ranges.length === 0) return;
+		if (keepIndex) {
+			previewSearchCurrentIndex = Math.min(Math.max(previousIndex, 0), ranges.length - 1);
+			markPreviewMatch(previewSearchCurrentIndex);
+		} else {
 			previewSearchCurrentIndex = 0;
 			scrollToPreviewMatch(0);
 		}
 	}
 
-	function scrollToPreviewMatch(index: number) {
+	function markPreviewMatch(index: number) {
 		const el = previewSearchHighlights[index];
-		if (!el) return;
+		if (!el) return null;
 		// Remove active class from all, add to current
 		for (const h of previewSearchHighlights) h.classList.remove('preview-search-active');
 		el.classList.add('preview-search-active');
-		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		return el;
 	}
+
+	function scrollToPreviewMatch(index: number) {
+		markPreviewMatch(index)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
+
+	// Re-apply the open search to freshly rendered preview HTML
+	function refreshPreviewSearch() {
+		if (showPreviewSearch && previewSearchQuery && markdownBody) performPreviewSearch(true);
+	}
+
+	// Each tab keeps its own search (query, case, current match) and preview position; they are
+	// saved when the tab is left and restored when it is shown again. Not persisted with the session.
+	interface TabViewState {
+		search: { open: boolean; query: string; caseSensitive: boolean; index: number };
+		anchor: PreviewAnchor | null;
+		content: string; // the rendered HTML the anchor was captured on
+	}
+	const tabViewStates = new Map<string, TabViewState>();
+	let shownTabId: string | null = null;
+	// set on a tab switch, consumed by the scroll-restore effect
+	let pendingTabAnchor: PreviewAnchor | null = null;
+
+	function saveTabViewState(id: string) {
+		const tab = tabManager.tabs.find((t) => t.id === id);
+		if (!tab) {
+			tabViewStates.delete(id);
+			return;
+		}
+		const previewShown = !!markdownBody && (!tab.isEditing || tab.isSplit) && markdownBody.getClientRects().length > 0;
+		tabViewStates.set(id, {
+			search: { open: showPreviewSearch, query: previewSearchQuery, caseSensitive: previewSearchCaseSensitive, index: previewSearchCurrentIndex },
+			anchor: previewShown ? capturePreviewAnchor(markdownBody!) : null,
+			content: tab.content
+		});
+	}
+
+	// Runs before the DOM update of a tab switch, while the preview still shows the old tab
+	$effect.pre(() => {
+		const id = tabManager.activeTabId;
+		untrack(() => {
+			if (id === shownTabId) return;
+			if (shownTabId) saveTabViewState(shownTabId);
+			for (const key of tabViewStates.keys()) {
+				if (!tabManager.tabs.some((t) => t.id === key)) tabViewStates.delete(key);
+			}
+			shownTabId = id;
+
+			const tab = id ? tabManager.tabs.find((t) => t.id === id) : undefined;
+			const saved = id ? tabViewStates.get(id) : undefined;
+			clearPreviewSearchHighlights();
+			previewSearchMatches = [];
+			previewSearchCurrentIndex = saved?.search.index ?? -1;
+			previewSearchQuery = saved?.search.query ?? '';
+			previewSearchCaseSensitive = saved?.search.caseSensitive ?? false;
+			showPreviewSearch = !!saved?.search.open && !!tab && !tab.isEditing;
+			pendingTabAnchor = saved && tab && saved.content === tab.content && (!tab.isEditing || tab.isSplit) ? saved.anchor : null;
+		});
+	});
 
 	function previewSearchNext() {
 		if (previewSearchMatches.length === 0) return;
@@ -888,6 +953,9 @@ import { t } from './utils/i18n.js';
 				throwOnError: false,
 			});
 		}
+
+		// highlight.js and KaTeX rebuild their elements, dropping search marks inside them
+		if (previewSearchHighlights.some((h) => !h.isConnected)) refreshPreviewSearch();
 	}
 
 	// One-way sync htmlContent into the article element (no bind:innerHTML to avoid
@@ -898,6 +966,7 @@ import { t } from './utils/i18n.js';
 			untrack(() => {
 				const tab = tabManager.activeTab;
 				if (tab?.isDirty && !tab.isEditing) syncTaskCheckboxes(tab.rawContent);
+				refreshPreviewSearch();
 			});
 		}
 	});
@@ -914,7 +983,13 @@ import { t } from './utils/i18n.js';
 		if (id && body) {
 			untrack(() => {
 				const tab = tabManager.tabs.find((t) => t.id === id);
-				if (tab) {
+				const anchor = pendingTabAnchor;
+				pendingTabAnchor = null;
+				if (tab && anchor) {
+					// back to a tab seen before: the exact element and offset it was left at. The
+					// pin also holds it while mermaid/KaTeX/highlighting change the page height.
+					pinPreviewPositionSettled(anchor);
+				} else if (tab) {
 					let scrolled = false;
 
 					if (tab.anchorLine > 0) {
@@ -2602,6 +2677,11 @@ import { t } from './utils/i18n.js';
 			} else {
 				previewSearchNext();
 			}
+		}
+		// A search restored by a tab switch is open while the preview has the focus, so Esc must
+		// close it from there too, not only from the search field (dialogs handle their own Esc)
+		if (e.key === 'Escape' && showPreviewSearch && !isEditing && !document.querySelector('.modal-content')) {
+			closePreviewSearch();
 		}
 		if ((cmdOrCtrl && key === 'r' && !isEditing) || (code === 'F5' && !isEditing)) {
 			e.preventDefault();

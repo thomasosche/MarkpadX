@@ -1,5 +1,5 @@
 // Runs the E2E suites strictly one after another (the app allows a single instance).
-// Usage: node tests/e2e/run.mjs [suite ...]     suites: main carry reload folder (default: all)
+// Usage: node tests/e2e/run.mjs [suite ...]     suites: main carry reload folder tabsearch (default: all)
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { EXE, markpadRunning } from './lib.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const ALL = ['main', 'carry', 'reload', 'folder'];
+const ALL = ['main', 'carry', 'reload', 'folder', 'tabsearch'];
 const wanted = process.argv.slice(2).map((a) => a.replace(/\.mjs$/, ''));
 const suites = wanted.length ? wanted : ALL;
 const unknown = suites.filter((x) => !ALL.includes(x));

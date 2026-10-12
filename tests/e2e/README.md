@@ -21,7 +21,7 @@ WebView2's DevTools protocol (real mouse and key events, no app hooks). Windows 
 
 ```
 npm run test:e2e                 # all suites, one after another
-node tests/e2e/run.mjs folder    # selected suites: main carry reload folder
+node tests/e2e/run.mjs folder    # selected suites: main carry reload folder tabsearch
 node tests/e2e/folder.mjs        # a single suite directly
 ```
 
@@ -33,6 +33,7 @@ node tests/e2e/folder.mjs        # a single suite directly
 | `carry.mjs` | 9335 | selection / caret carry-over between view and edit mode at several zoom levels |
 | `reload.mjs` | 9336 | auto reload after external changes (observation: records positions, asserts a few invariants) |
 | `folder.mjs` | 9337 | folder pane (I-05), 11 checks, see below |
+| `tabsearch.mjs` | 9338 | per-tab preview search (Ctrl+F): query, current match, highlights and reading position survive tab switches; F3 / Esc per tab |
 
 ## Isolation and safety
 
