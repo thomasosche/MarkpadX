@@ -15,6 +15,8 @@
 - Navigate results with `Enter` / `Shift+Enter` or arrow buttons
 - Search-as-you-type from 3+ characters for performance on large documents
 - Case-sensitive toggle
+- **Each tab keeps its own search**: the query, case setting, current match and highlights are saved when you leave a tab and restored when you come back. Highlights are re-applied after the preview re-renders (reload, mermaid/KaTeX/highlighting) without moving the view
+- `Esc` closes a restored search from the preview, not only from the search field
 
 ### Preview Link Navigation
 Clickable links in the rendered preview — all paths are resolved relative to the current file:
@@ -39,6 +41,7 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 
 ### Tab Navigation
 - `←` / `→` (preview mode) switch to the previous / next tab
+- **Switching back to a tab restores its exact reading position** (element and pixel offset, pinned while mermaid/KaTeX/highlighting settle) instead of jumping to the section heading. The position is kept in memory only while the content is unchanged; it is not persisted with the session
 - Mouse buttons 4 / 5 (back / forward) walk the most-recently-used tab history — clicking a markdown link opens a new tab, mouse-back returns to the originating tab
 - `Ctrl+Shift+W` closes all other tabs (asks for each tab with unsaved changes)
 - Tabs with unsaved changes show a dot in front of the tab name
