@@ -55,6 +55,12 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - Keyboard: `Space` or `Enter` on a focused checkbox toggles it
 
 ### Selection Carry-over (Edit ↔ View)
+- Context-menu Edit snapshots the selection before menu focus changes it and maps
+  HTML formatting/entity text to exact source offsets, including repeated phrases.
+- Ctrl+V and Paste in the editor's Find field update the query without inserting
+  clipboard text into the document. When literal Find has no match, a separate
+  rendered-text result strip navigates text separated by HTML or Markdown formatting.
+  Native literal/regex/whole-word/Replace behavior remains separate.
 - Text selected in the rendered preview stays selected in the editor when switching to edit mode, and vice versa
 - The selection (or caret row) lands at the **same height on screen** as before the switch, instead of jumping
 - A plain caret (no selection) is carried too: its row is located in the preview and briefly glows (about one second, then fades out completely) without changing the real selection

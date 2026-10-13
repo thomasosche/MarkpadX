@@ -1,0 +1,45 @@
+name: Navigation test executable (no release)
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/components/Editor.svelte'
+      - 'src/lib/MarkdownViewer.svelte'
+      - 'src/lib/utils/selection.ts'
+      - 'src/lib/utils/clipboard.ts'
+      - 'tests/**'
+      - '.github/workflows/navigation_test_build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-test:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - name: Build standalone debug executable
+        run: npm run tauri build -- --debug --no-bundle
+      - name: Rust regression tests
+        working-directory: src-tauri
+        run: cargo test
+      - name: Existing native selection and search regression suites
+        run: node tests/e2e/run.mjs carry tabsearch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Markpad-navigation-test
+          path: src-tauri/target/debug/Markpad.exe
+          if-no-files-found: error
+          retention-days: 7
