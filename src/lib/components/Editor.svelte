@@ -13,7 +13,7 @@
 	import { initVimMode } from "monaco-vim";
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
-	import { byteColToIndex, indexToByteCol, findSourceText, sourceToPlain, type SourceSelection } from '../utils/selection.js';
+	import { byteColToIndex, indexToByteCol, findSourceText, sourceSelectionToPlain, type SourceSelection } from '../utils/selection.js';
 	import { mapLines } from '../utils/linemap.js';
 	import { pasteIntoTextField } from '../utils/clipboard.js';
 
@@ -1246,19 +1246,23 @@
 		const lineText = model.getLineContent(sel.startLineNumber);
 		const sourceStart = model.getOffsetAt(sel.getStartPosition());
 		const text = model.getValueInRange(sel);
-		const query = sourceToPlain(text || lineText);
+		const sourceEnd = model.getOffsetAt(sel.getEndPosition());
+		const query = sourceSelectionToPlain(model.getValue(),
+			text ? sourceStart : sourceStart - sel.startColumn + 1,
+			text ? sourceEnd : sourceStart - sel.startColumn + 1 + lineText.length);
 		// Only keep the on-screen height when the selection is actually visible
 		const visible = editor.getScrolledVisiblePosition(sel.getStartPosition());
 		const height = editor.getLayoutInfo().height;
 		return {
 			text,
+			plainText: text ? query : undefined,
 			startLine: sel.startLineNumber,
 			endLine: sel.endLineNumber,
 			startColumn: indexToByteCol(lineText, sel.startColumn - 1),
 			lineText,
 			occurrence: 0,
 			sourceStart,
-			sourceEnd: model.getOffsetAt(sel.getEndPosition()),
+			sourceEnd,
 			globalOccurrence: findSourceText(model.getValue(), query).filter(h => h.end <= sourceStart).length,
 			viewportOffset: visible && visible.top >= 0 && visible.top < height ? visible.top : undefined,
 			viewportRatio: visible && visible.top >= 0 && visible.top < height ? visible.top / height : undefined,

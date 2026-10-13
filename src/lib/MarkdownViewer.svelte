@@ -1619,16 +1619,17 @@ import { t } from './utils/i18n.js';
 			}
 		}
 
-		const locate = (offset: number): [Text, number] => {
+		const locate = (offset: number, start = false): [Text, number] => {
 			for (const node of nodes) {
-				if (offset <= node.data.length) return [node, offset];
+				// Start at the next node on a boundary; end at the preceding node.
+				if (offset < node.data.length || (!start && offset === node.data.length)) return [node, offset];
 				offset -= node.data.length;
 			}
 			const last = nodes[nodes.length - 1];
 			return [last, last.data.length];
 		};
 		const range = document.createRange();
-		range.setStart(...locate(map[index]));
+		range.setStart(...locate(map[index], true));
 		range.setEnd(...locate(map[index + needle.length - 1] + 1));
 		return range;
 	}
@@ -1655,7 +1656,7 @@ import { t } from './utils/i18n.js';
 		const candidates = [...atPoint, ...onLine.filter((el) => !atPoint.includes(el)), markdownBody];
 
 		let range: Range | null = null;
-		const needle = normalize(sourceToPlain(info.text));
+		const needle = normalize(info.plainText ?? sourceToPlain(info.text));
 		if (needle) {
 			for (const el of candidates) {
 				range = findInElement(el, needle, info);
