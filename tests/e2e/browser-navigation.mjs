@@ -83,6 +83,10 @@ try {
 	await send('Runtime.enable');
 	await send('Page.navigate', { url: 'http://127.0.0.1:4175/' });
 	await wait("!!document.querySelector('article.markdown-body td[data-row=\"140\"]')");
+	const zoom = Number(process.env.MARKPAD_TEST_ZOOM || 100);
+	const position = Number(process.env.MARKPAD_TEST_POSITION || 0.5);
+	for (let z = 100; z < zoom; z += 10) await key('=', 'Equal', 187);
+	await sleep(400);
 	await evaluate(`(() => {
 		const cell = document.querySelector('article.markdown-body td[data-row="140"]');
 		cell.scrollIntoView({ block: 'center' });
@@ -90,6 +94,15 @@ try {
 		getSelection().removeAllRanges(); getSelection().addRange(range);
 	})()`);
 	await sleep(250);
+	await evaluate(`(() => {
+		const body = document.querySelector('article.markdown-body');
+		const range = getSelection().getRangeAt(0);
+		const view = body.getBoundingClientRect();
+		const scale = view.height / body.offsetHeight;
+		body.scrollTop += (range.getBoundingClientRect().top - view.top - ${position} * view.height) / scale;
+	})()`);
+	await sleep(150);
+	const beforePosition = await evaluate(`(() => { const view = document.querySelector('article.markdown-body').getBoundingClientRect(); return (getSelection().getRangeAt(0).getBoundingClientRect().top - view.top) / view.height; })()`);
 	// Use the actual context menu, including its focus transfer.
 	const point = await evaluate(`(() => { const r = document.querySelector('td[data-row="140"]').getBoundingClientRect(); return { x: r.x + 5, y: r.y + 5 }; })()`);
 	await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'right', clickCount: 1 });
@@ -98,9 +111,13 @@ try {
 	await evaluate(`Array.from(document.querySelectorAll('.context-menu .menu-item')).find(b => b.textContent.trim() === 'Edit').click()`);
 	await wait("!!document.querySelector('.monaco-editor')");
 	await evaluate(`(async () => { window.monacoTest = await import('/node_modules/.vite/deps/monaco-editor.js'); window.ed = monacoTest.editor.getEditors()[0]; })()`);
+	await sleep(300);
 	const selected = await evaluate(`({ text: ed.getModel().getValueInRange(ed.getSelection()), line: ed.getSelection().startLineNumber })`);
 	assert.equal(selected.text, 'Product&nbsp;<strong>meets</strong> validation');
 	assert.equal(selected.line, 143, 'select second occurrence, not first or heading');
+	const editorPosition = await evaluate(`ed.getScrolledVisiblePosition(ed.getSelection().getStartPosition()).top / ed.getLayoutInfo().height`);
+	assert.ok(Math.abs(editorPosition - beforePosition) < 0.05, `viewport at zoom ${zoom}: ${beforePosition} -> ${editorPosition}`);
+	console.log(`PASS viewport retention at ${zoom}% zoom, target ${position}`);
 	console.log('PASS context-menu exact selection across HTML/entity, repeated phrase');
 	await key('f', 'KeyF', 70);
 	await wait("!!document.querySelector('.find-widget.visible')");
@@ -156,6 +173,7 @@ try {
 	await wait('fixture.saves === 1');
 	await key('e', 'KeyE', 69);
 	await wait("!document.querySelector('.monaco-editor')");
+	await wait("document.querySelector('article.markdown-body td[data-row=\"140\"]')?.textContent.includes('updated validation')");
 	await sleep(600);
 	assert.ok(await evaluate(`(() => { const cell = document.querySelector('td[data-row="140"]'); const r = cell.getBoundingClientRect(); const v = document.querySelector('article.markdown-body').getBoundingClientRect(); return cell.textContent.includes('updated validation') && r.top >= v.top && r.bottom <= v.bottom; })()`));
 	console.log('PASS edit/save returns to updated table row');

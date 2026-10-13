@@ -59,6 +59,7 @@
 	let container: HTMLDivElement;
 	let vimStatusNode = $state<HTMLDivElement>();
 	let editor: monaco.editor.IStandaloneCodeEditor;
+	let cancelSourcePositionPin: (() => void) | undefined;
 	let renderedFindRanges = $state<monaco.Range[]>([]);
 	let renderedFindIndex = $state(0);
 	let renderedFindDecorations: monaco.editor.IEditorDecorationsCollection | undefined;
@@ -914,6 +915,7 @@
 		}, 'editorTextFocus');
 
 		return () => {
+			cancelSourcePositionPin?.();
 			window.open = originalOpen;
 			mediaQuery.removeEventListener("change", updateTheme);
 			container.removeEventListener("wheel", wheelListener, { capture: true });
@@ -1259,6 +1261,7 @@
 			sourceEnd: model.getOffsetAt(sel.getEndPosition()),
 			globalOccurrence: findSourceText(model.getValue(), query).filter(h => h.end <= sourceStart).length,
 			viewportOffset: visible && visible.top >= 0 && visible.top < height ? visible.top : undefined,
+			viewportRatio: visible && visible.top >= 0 && visible.top < height ? visible.top / height : undefined,
 		};
 	}
 
@@ -1295,9 +1298,31 @@
 		if (!range) range = new monaco.Range(from, fromCol, from, fromCol);
 
 		editor.setSelection(range);
-		if (info.viewportOffset !== undefined) {
-			const offset = Math.max(0, Math.min(info.viewportOffset, editor.getLayoutInfo().height - 40));
-			editor.setScrollTop(editor.getTopForLineNumber(range.startLineNumber) - offset, monaco.editor.ScrollType.Immediate);
+		if (info.viewportOffset !== undefined || info.viewportRatio !== undefined) {
+			cancelSourcePositionPin?.();
+			const target = range;
+			const version = model.getVersionId();
+			const place = () => {
+				if (editor.getModel() !== model || model.getVersionId() !== version) { stop(); return; }
+				const height = editor.getLayoutInfo().height;
+				const desired = info.viewportRatio !== undefined ? info.viewportRatio * height : info.viewportOffset!;
+				const offset = Math.max(0, Math.min(desired, height - 40));
+				editor.setSelection(target);
+				editor.setScrollTop(editor.getTopForPosition(target.startLineNumber, target.startColumn) - offset, monaco.editor.ScrollType.Immediate);
+			};
+			// The pane changes size after mounting; keep the anchor while layout/wrapping settles.
+			const layout = editor.onDidLayoutChange(place);
+			const contentSize = editor.onDidContentSizeChange(place);
+			const stop = () => {
+				layout.dispose(); contentSize.dispose(); clearTimeout(deadline); cancelAnimationFrame(frame);
+				for (const event of ['wheel', 'mousedown', 'keydown']) container.removeEventListener(event, stop, true);
+				if (cancelSourcePositionPin === stop) cancelSourcePositionPin = undefined;
+			};
+			const deadline = setTimeout(stop, 1500);
+			const frame = requestAnimationFrame(place);
+			for (const event of ['wheel', 'mousedown', 'keydown']) container.addEventListener(event, stop, true);
+			cancelSourcePositionPin = stop;
+			place();
 		} else {
 			editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Immediate);
 		}
