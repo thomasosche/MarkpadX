@@ -13,8 +13,9 @@
 	import { initVimMode } from "monaco-vim";
 	import { openUrl } from "@tauri-apps/plugin-opener";
 	import { invoke } from "@tauri-apps/api/core";
-	import { byteColToIndex, indexToByteCol, IGNORED_CLASS, normalize, type SourceSelection } from '../utils/selection.js';
+	import { byteColToIndex, indexToByteCol, findSourceText, sourceToPlain, type SourceSelection } from '../utils/selection.js';
 	import { mapLines } from '../utils/linemap.js';
+	import { pasteIntoTextField } from '../utils/clipboard.js';
 
 	let {
 		value = $bindable(),
@@ -58,6 +59,27 @@
 	let container: HTMLDivElement;
 	let vimStatusNode = $state<HTMLDivElement>();
 	let editor: monaco.editor.IStandaloneCodeEditor;
+	let renderedFindRanges = $state<monaco.Range[]>([]);
+	let renderedFindIndex = $state(0);
+	let renderedFindDecorations: monaco.editor.IEditorDecorationsCollection | undefined;
+
+	// Read-only supplement to Monaco Find. Never adds synthetic matches to Replace.
+	type FindState = {
+		searchString: string; isRevealed: boolean; isReplaceRevealed: boolean;
+		isRegex: boolean; wholeWord: boolean; matchCase: boolean; matchesCount: number;
+		searchScope: monaco.Range[] | null;
+		onFindReplaceStateChange: (listener: () => void) => monaco.IDisposable;
+	};
+	type FindController = monaco.editor.IEditorContribution & { getState(): FindState };
+
+	function navigateRenderedFind(delta: number, focus = false) {
+		if (!renderedFindRanges.length) return;
+		renderedFindIndex = (renderedFindIndex + delta + renderedFindRanges.length) % renderedFindRanges.length;
+		const range = renderedFindRanges[renderedFindIndex];
+		editor.setSelection(range);
+		editor.revealRangeInCenterIfOutsideViewport(range, monaco.editor.ScrollType.Immediate);
+		if (focus) editor.focus();
+	}
 	let isApplyingExternalScroll = false;
 	const managedImages: {
 		embed: string;
@@ -604,7 +626,56 @@
 
 		container.addEventListener("wheel", wheelListener, { capture: true });
 
+		let renderedFindTimer: ReturnType<typeof setTimeout> | undefined;
+		let renderedFindKey = '';
+		const updateRenderedFind = () => {
+			clearTimeout(renderedFindTimer);
+			renderedFindTimer = setTimeout(() => {
+				const state = editor.getContribution<FindController>('editor.contrib.findController')?.getState();
+				const model = editor.getModel();
+				const eligible = model && language === 'markdown' && state?.isRevealed && state.searchString
+					&& !state.isRegex && !state.wholeWord && !state.isReplaceRevealed && !state.searchScope;
+				const key = eligible ? `${model.getVersionId()}:${state.matchCase}:${state.searchString}` : '';
+				if (key === renderedFindKey) return;
+				renderedFindKey = key;
+				const source = model?.getValue() ?? '';
+				const hits = eligible ? findSourceText(source, state.searchString, state.matchCase) : [];
+				const compare = (text: string) => state?.matchCase ? text : text.toLowerCase();
+				const additional = eligible && hits.some(hit => compare(source.slice(hit.start, hit.end)) !== compare(state.searchString));
+				renderedFindRanges = additional ? hits.map(hit => {
+					const start = model.getPositionAt(hit.start);
+					const end = model.getPositionAt(hit.end);
+					return new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+				}) : [];
+				renderedFindIndex = 0;
+				renderedFindDecorations ??= editor.createDecorationsCollection();
+				renderedFindDecorations.set(renderedFindRanges.map(range => ({
+					range, options: { inlineClassName: 'rendered-find-match' }
+				})));
+				if (renderedFindRanges.length) navigateRenderedFind(0);
+			}, 100);
+		};
+		const findStateListener = editor.getContribution<FindController>('editor.contrib.findController')
+			?.getState().onFindReplaceStateChange(updateRenderedFind);
+		const findKeys = (event: KeyboardEvent) => {
+			const field = event.target;
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v'
+				&& (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)
+				&& field.closest('.find-widget')) {
+				event.preventDefault();
+				event.stopPropagation();
+				void pasteIntoTextField(field, () => invoke<string>('clipboard_read_text')).catch(console.error);
+				return;
+			}
+			if (event.key === 'Enter' && renderedFindRanges.length && (event.target as Element).closest('.find-widget')) {
+				event.preventDefault();
+				event.stopPropagation();
+				navigateRenderedFind(event.shiftKey ? -1 : 1);
+			}
+		};
+		container.addEventListener('keydown', findKeys, true);
 		const contentChangeListener = editor.onDidChangeModelContent((e) => {
+			updateRenderedFind();
 			if (e.isUndoing && managedImages.length > 0) {
 				const currentContent = editor.getValue();
 				const last = managedImages[managedImages.length - 1];
@@ -693,6 +764,7 @@
 		editor.addAction({
 			id: "custom-copy",
 			label: t('menu.copy', uiLanguage),
+			precondition: 'editorTextFocus',
 			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC],
 			run: async (ed) => {
 				const selection = ed.getSelection();
@@ -839,13 +911,17 @@
 			} catch (err) {
 				console.error("Paste failed:", err);
 			}
-		});
+		}, 'editorTextFocus');
 
 		return () => {
 			window.open = originalOpen;
 			mediaQuery.removeEventListener("change", updateTheme);
 			container.removeEventListener("wheel", wheelListener, { capture: true });
 			contentChangeListener.dispose();
+			findStateListener?.dispose();
+			clearTimeout(renderedFindTimer);
+			container.removeEventListener('keydown', findKeys, true);
+			renderedFindDecorations?.clear();
 			completionProvider.dispose();
 
 			if (editor && currentTabId) {
@@ -1166,16 +1242,22 @@
 		const sel = editor?.getSelection();
 		if (!model || !sel) return null;
 		const lineText = model.getLineContent(sel.startLineNumber);
+		const sourceStart = model.getOffsetAt(sel.getStartPosition());
+		const text = model.getValueInRange(sel);
+		const query = sourceToPlain(text || lineText);
 		// Only keep the on-screen height when the selection is actually visible
 		const visible = editor.getScrolledVisiblePosition(sel.getStartPosition());
 		const height = editor.getLayoutInfo().height;
 		return {
-			text: model.getValueInRange(sel),
+			text,
 			startLine: sel.startLineNumber,
 			endLine: sel.endLineNumber,
 			startColumn: indexToByteCol(lineText, sel.startColumn - 1),
 			lineText,
 			occurrence: 0,
+			sourceStart,
+			sourceEnd: model.getOffsetAt(sel.getEndPosition()),
+			globalOccurrence: findSourceText(model.getValue(), query).filter(h => h.end <= sourceStart).length,
 			viewportOffset: visible && visible.top >= 0 && visible.top < height ? visible.top : undefined,
 		};
 	}
@@ -1188,25 +1270,26 @@
 		const from = Math.max(1, Math.min(lineCount, info.startLine));
 		const to = Math.max(from, Math.min(lineCount, info.endLine));
 		const fromCol = byteColToIndex(model.getLineContent(from), info.startColumn) + 1;
-		const blockRange = new monaco.Range(from, fromCol, to, model.getLineMaxColumn(to));
-
 		let range: monaco.Range | null = null;
-		const needle = normalize(info.text);
-		if (needle) {
-			const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			// Rendered text lacks markdown syntax: allow syntax chars between characters and
-			// any whitespace (including newlines, which puts Monaco into multiline search) for spaces
-			const loose = Array.from(needle)
-				.map((ch) => (ch === ' ' ? '(?:\\s|\\n)+' : escape(ch)))
-				.join(IGNORED_CLASS);
-			for (const search of [escape(info.text.trim()), loose]) {
-				const inBlock = model.findMatches(search, blockRange, true, true, null, false);
-				const match = inBlock[Math.min(info.occurrence, inBlock.length - 1)]
-					?? model.findNextMatch(search, { lineNumber: from, column: fromCol }, true, true, null, false);
-				if (match) {
-					range = match.range;
-					break;
-				}
+		if (info.text.trim()) {
+			const source = model.getValue();
+			const hits = findSourceText(source, info.text);
+			const blockStart = model.getOffsetAt({ lineNumber: from, column: fromCol });
+			const blockEnd = model.getOffsetAt({ lineNumber: to, column: model.getLineMaxColumn(to) });
+			const inBlock = hits.filter(h => h.start >= blockStart && h.end <= blockEnd);
+			const exact = hits.find(h => h.start === info.sourceStart && h.end === info.sourceEnd);
+			const hit = exact ?? inBlock[info.occurrence]
+				?? (info.globalOccurrence !== undefined ? hits[info.globalOccurrence] : undefined);
+			if (hit) {
+				const start = model.getPositionAt(hit.start);
+				const end = model.getPositionAt(hit.end);
+				range = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+			}
+			// Literal code/syntax selections must still work; never wrap to another section.
+			if (!range) {
+				const literal = model.findMatches(info.text.trim(),
+					new monaco.Range(from, fromCol, to, model.getLineMaxColumn(to)), false, true, null, false);
+				range = literal[info.occurrence]?.range ?? null;
 			}
 		}
 		if (!range) range = new monaco.Range(from, fromCol, from, fromCol);
@@ -1223,6 +1306,13 @@
 </script>
 
 <div class="editor-outer">
+	{#if renderedFindRanges.length}
+		<div class="rendered-find-results" role="search" aria-label="Rendered text matches">
+			<span role="status">Rendered text: {renderedFindIndex + 1} of {renderedFindRanges.length}</span>
+			<button onclick={() => navigateRenderedFind(-1, true)} aria-label="Previous rendered text match">↑</button>
+			<button onclick={() => navigateRenderedFind(1, true)} aria-label="Next rendered text match">↓</button>
+		</div>
+	{/if}
 	<div
 		class="editor-container"
 		bind:this={container}
@@ -1265,6 +1355,7 @@
 
 <style>
 	.editor-outer {
+		position: relative;
 		flex: 1;
 		height: 100%;
 		width: 100%;
@@ -1277,6 +1368,27 @@
 		height: 100%;
 		width: 100%;
 		min-width: 0;
+	}
+
+	.rendered-find-results {
+		position: absolute;
+		top: 46px;
+		right: 24px;
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 8px;
+		background: var(--color-canvas-default);
+		color: var(--color-fg-default);
+		border: 1px solid var(--color-border-default);
+		border-radius: 4px;
+		font-size: 12px;
+	}
+
+	:global(.rendered-find-match) {
+		background-color: rgba(255, 196, 0, 0.3);
+		outline: 1px solid rgba(255, 196, 0, 0.8);
 	}
 
 	:global(.ghost-caret) {

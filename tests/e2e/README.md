@@ -76,3 +76,20 @@ Fixture: `A/` with `a.md B.md 2.md 10.md notes.txt .hidden.md sub/c.md` and a ju
 - The native folder picker behind "Open Folder..." (the suite only asserts that the menu entry exists).
 - Refresh when the window regains focus.
 - A folder on a network share.
+
+## Isolated frontend navigation regression
+
+Start `npm run dev -- --host 127.0.0.1 --port 4175`, then run
+`node tests/e2e/browser-navigation.mjs` on Windows with Edge installed.
+`MARKPAD_TEST_BROWSER` can override the Edge executable path.
+
+This test uses real Svelte/Monaco in a fresh headless browser profile, synthetic
+HTML-table documents and mock Tauri file/clipboard commands. It covers context-menu
+Edit, repeated phrases, HTML formatting/entities, Ctrl+V and Paste in Find,
+formatted-text fallback, literal Find, preview return, repeated switching and edit/save
+position retention. It does not test native Rust rendering or the OS clipboard.
+It never launches the user's Markpad instance or accesses real documents.
+
+The manual `Navigation test executable (no release)` workflow builds a separate
+Windows executable and runs the existing native carry/tabsearch suites. It publishes
+only a temporary build artifact, never a release or installer.

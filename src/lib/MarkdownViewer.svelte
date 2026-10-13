@@ -22,9 +22,12 @@
 import { processMarkdownHtml } from './utils/markdown';
 import { findTaskMarkers, resolveTaskLine, setTaskMarkerOnLine, sourceposLine, taskMarkerOnLine, type RenderedTask } from './utils/tasks.js';
 import { mapLines, type LineMapping } from './utils/linemap.js';
+	import { pasteIntoTextField } from './utils/clipboard.js';
 	import {
 		byteColToIndex,
+		indexToByteCol,
 		findAll,
+		findSourceText,
 		normalize,
 		normalizeWithMap,
 		parseSourcepos,
@@ -1527,11 +1530,45 @@ import { t } from './utils/i18n.js';
 		};
 		const startBlock = blockOf(range.startContainer);
 		const startPos = startBlock && parseSourcepos(startBlock);
-		if (!startBlock || !startPos) return null;
 		const endBlock = blockOf(range.endContainer);
 		const endPos = (endBlock && parseSourcepos(endBlock)) || startPos;
 
 		const text = sel.toString();
+		const beforeDocument = document.createRange();
+		beforeDocument.setStart(markdownBody, 0);
+		beforeDocument.setEnd(range.startContainer, range.startOffset);
+		const globalOccurrence = findAll(normalize(beforeDocument.toString()), normalize(text)).length;
+		const sourceHits = findSourceText(rawContent, text);
+		let hit: { start: number; end: number } | undefined;
+		if (startBlock && startPos && endPos) {
+			const lines = rawContent.split('\n');
+			const offsetAt = (line: number, col: number) =>
+				lines.slice(0, line - 1).reduce((sum, value) => sum + value.length + 1, 0)
+				+ byteColToIndex(lines[line - 1] ?? '', col);
+			const start = offsetAt(startPos.startLine, startPos.startCol);
+			const end = offsetAt(endPos.endLine, endPos.endCol + 1);
+			const beforeBlock = document.createRange();
+			beforeBlock.setStart(startBlock, 0);
+			beforeBlock.setEnd(range.startContainer, range.startOffset);
+			const occurrence = findAll(normalize(beforeBlock.toString()), normalize(text)).length;
+			hit = sourceHits.filter(h => h.start >= start && h.end <= end)[occurrence];
+		} else {
+			// Raw HTML has no comrak sourcepos; use the occurrence in rendered document order.
+			hit = sourceHits[globalOccurrence];
+		}
+		if (hit) {
+			const prefix = rawContent.slice(0, hit.start).split('\n');
+			const line = prefix[prefix.length - 1];
+			return {
+				text, startLine: prefix.length,
+				endLine: rawContent.slice(0, hit.end).split('\n').length,
+				startColumn: indexToByteCol(line, line.length),
+				occurrence: 0, globalOccurrence: sourceHits.indexOf(hit),
+				sourceStart: hit.start, sourceEnd: hit.end,
+				viewportOffset: selRect.top - bodyRect.top
+			};
+		}
+		if (!startBlock || !startPos || !endPos) return null;
 		const before = document.createRange();
 		before.setStart(startBlock, 0);
 		before.setEnd(range.startContainer, range.startOffset);
@@ -1561,6 +1598,9 @@ import { t } from './utils/i18n.js';
 
 		let index = matches[0];
 		const pos = parseSourcepos(el);
+		if (el === markdownBody && info.globalOccurrence !== undefined) {
+			index = matches[Math.min(info.globalOccurrence, matches.length - 1)];
+		}
 		if (matches.length > 1 && pos) {
 			if (pos.startLine === info.startLine && info.lineText !== undefined) {
 				// Count earlier occurrences between the element's start and the selection on the same source line
@@ -1610,7 +1650,7 @@ import { t } from './utils/i18n.js';
 			})
 			.reverse();
 		const atPoint = onLine.filter((el) => sourceposContains(parseSourcepos(el)!, info.startLine, info.startColumn));
-		const candidates = [...atPoint, ...onLine.filter((el) => !atPoint.includes(el))];
+		const candidates = [...atPoint, ...onLine.filter((el) => !atPoint.includes(el)), markdownBody];
 
 		let range: Range | null = null;
 		const needle = normalize(sourceToPlain(info.text));
@@ -2036,14 +2076,15 @@ import { t } from './utils/i18n.js';
 		}, 150);
 	}
 
-	async function toggleEdit(autoSave = false) {
+	async function toggleEdit(autoSave = false, previewSelection?: SourceSelection | null) {
 		const tab = tabManager.activeTab;
 		if (!tab || tab.path === undefined) return;
 		if (showPreviewSearch) closePreviewSearch();
 		hideModeSwitchGlow();
 
 		// Carry the cursor/selection across the mode switch (not needed in split view)
-		const carriedSelection = isSplit ? null : isEditing ? editorPane?.getSelectionInfo() ?? null : captureViewSelection();
+		const carriedSelection = isSplit ? null : isEditing ? editorPane?.getSelectionInfo() ?? null
+			: previewSelection ?? captureViewSelection();
 
 		if (isEditing) {
 			// Switch back to view
@@ -2331,12 +2372,28 @@ import { t } from './utils/i18n.js';
 	}
 
 	function handleContextMenu(e: MouseEvent) {
+		const field = e.target;
+		if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && field.closest('.find-widget')) {
+			e.preventDefault();
+			docContextMenu = {
+				show: true, x: e.clientX, y: e.clientY,
+				items: [{ label: t('menu.paste', uiLanguage), onClick: () => {
+					void pasteIntoTextField(field, () => invoke<string>('clipboard_read_text'))
+						.then(() => field.focus()).catch(console.error);
+				} }]
+			};
+			return;
+		}
+		// Keep the native Paste menu in search/input fields; don't replace it with document actions.
+		if ((e.target as Element).closest('input, textarea') && !(e.target as Element).closest('.inputarea')) return;
 		if (mode !== 'app') return;
 		e.preventDefault();
 
 		const selection = window.getSelection();
 		const hasSelection = selection ? selection.toString().length > 0 : false;
 		const isInsideEditor = (e.target as HTMLElement).closest('.editor-container');
+		// Snapshot before menu focus or its button click can collapse the DOM selection.
+		const editSelection = !isEditing ? captureViewSelection() : null;
 
 		// detect heading for copy ref
 		const heading = (e.target as HTMLElement).closest('h1, h2, h3, h4, h5, h6');
@@ -2397,7 +2454,7 @@ import { t } from './utils/i18n.js';
 				} },
 				{ separator: true },
 				{ label: t('menu.openLocation', uiLanguage), onClick: openFileLocation, disabled: !currentFile },
-				{ label: t('menu.edit', uiLanguage), onClick: () => toggleEdit() },
+				{ label: t('menu.edit', uiLanguage), onClick: () => toggleEdit(false, editSelection) },
 				{ separator: true },
 				{ label: t('menu.closeFile', uiLanguage), onClick: closeFile },
 			],
