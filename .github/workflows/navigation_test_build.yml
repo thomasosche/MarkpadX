@@ -35,8 +35,22 @@ jobs:
       - name: Rust regression tests
         working-directory: src-tauri
         run: cargo test
+      - name: Prepare medium-integrity UI test process
+        # WebView2 ignores debugger environment flags for elevated hosts.
+        # Matches Tauri's own Windows E2E strategy; changes only this disposable runner.
+        run: |
+          winget install gerardog.gsudo --accept-source-agreements --accept-package-agreements --silent
+          icacls "$env:GITHUB_WORKSPACE" /grant "${env:USERNAME}:(OI)(CI)F"
+          'C:\Program Files\gsudo' >> $env:GITHUB_PATH
       - name: Existing native selection and search regression suites
-        run: node tests/e2e/run.mjs carry tabsearch
+        run: gsudo --integrity Medium node tests/e2e/run.mjs carry tabsearch
+      - name: Preserve native-test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Navigation-test-logs
+          path: ${{ runner.temp }}/markpadx-e2e/*/logs/*
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: Markpad-navigation-test
