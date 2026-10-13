@@ -3,6 +3,8 @@
 
 export type SourceSelection = {
 	text: string;
+	/** Context-aware visible text, including literal code selected without its delimiters. */
+	plainText?: string;
 	startLine: number;
 	endLine: number;
 	/** 1-based UTF-8 byte column, same convention as comrak's sourcepos */
@@ -64,8 +66,44 @@ export function indexToByteCol(line: string, index: number): number {
 	return new TextEncoder().encode(line.slice(0, index)).length + 1;
 }
 
-/** Roughly turn markdown source into the text it renders to */
-export function sourceToPlain(source: string): string {
+type CodeRange = { start: number; end: number; contentStart: number; contentEnd: number };
+
+/** Protect code before interpreting HTML, entities, links or paragraph prefixes. */
+function codeRanges(source: string): CodeRange[] {
+	const ranges: CodeRange[] = [];
+	const fences = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)(?:\r?\n|$)/gm;
+	for (let open; (open = fences.exec(source));) {
+		if (open[1][0] === '`' && open[2].includes('`')) continue;
+		const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*(?:\\r?\\n|$)`, 'gm');
+		close.lastIndex = fences.lastIndex;
+		const end = close.exec(source);
+		ranges.push({ start: open.index, end: end ? close.lastIndex : source.length,
+			contentStart: fences.lastIndex, contentEnd: end ? end.index : source.length });
+		fences.lastIndex = end ? close.lastIndex : source.length;
+	}
+	const ticks = /`+/g;
+	for (let open; (open = ticks.exec(source));) {
+		const fence = ranges.find(r => open.index >= r.start && open.index < r.end);
+		if (fence) { ticks.lastIndex = fence.end; continue; }
+		let slashes = 0;
+		for (let i = open.index - 1; i >= 0 && source[i] === '\\'; i--) slashes++;
+		if (slashes % 2) continue;
+		const nextFence = ranges.find(r => r.start > open.index);
+		const closing = /`+/g;
+		closing.lastIndex = ticks.lastIndex;
+		for (let end; (end = closing.exec(source));) {
+			if (nextFence && end.index >= nextFence.start) break;
+			if (end[0].length !== open[0].length) continue;
+			ranges.push({ start: open.index, end: closing.lastIndex,
+				contentStart: ticks.lastIndex, contentEnd: end.index });
+			ticks.lastIndex = closing.lastIndex;
+			break;
+		}
+	}
+	return ranges.sort((a, b) => a.start - b.start);
+}
+
+function nonCodeToPlain(source: string): string {
 	return source
 		.replace(/!?\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1')
 		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -73,6 +111,24 @@ export function sourceToPlain(source: string): string {
 		.replace(/&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);/g, decodeEntity)
 		.replace(/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/gm, '')
 		.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/gm, '');
+}
+
+/** Roughly turn markdown source into rendered text, keeping code contents literal. */
+export function sourceToPlain(source: string): string {
+	let plain = '';
+	let previous = 0;
+	for (const range of codeRanges(source)) {
+		plain += nonCodeToPlain(source.slice(previous, range.start));
+		plain += source.slice(range.contentStart, range.contentEnd);
+		previous = range.end;
+	}
+	return plain + nonCodeToPlain(source.slice(previous));
+}
+
+export function sourceSelectionToPlain(source: string, start: number, end: number): string {
+	const text = source.slice(start, end);
+	return codeRanges(source).some(r => start >= r.contentStart && end <= r.contentEnd)
+		? text : sourceToPlain(text);
 }
 
 /** Strip syntax characters and collapse whitespace; map[i] is the original index of text[i] */
@@ -142,6 +198,7 @@ export function sourceTextWithMap(source: string): SourceTextMap {
 	let plain = '';
 	const starts: number[] = [];
 	const ends: number[] = [];
+	const code = new Map(codeRanges(source).map(range => [range.start, range]));
 	const omitted = new Map<number, number>();
 	for (const m of source.matchAll(/!?\[\[(?:([^\]|]*)\|)?([^\]]*)\]\]/g)) {
 		const labelStart = m.index + m[0].indexOf('[[') + 2 + (m[1] !== undefined ? m[1].length + 1 : 0);
@@ -163,6 +220,12 @@ export function sourceTextWithMap(source: string): SourceTextMap {
 		for (let k = 0; k < value.length; k++) { starts.push(start); ends.push(end); }
 	};
 	for (let i = 0; i < source.length;) {
+		const literal = code.get(i);
+		if (literal) {
+			for (let k = literal.contentStart; k < literal.contentEnd; k++) emit(source[k], k, k + 1);
+			i = literal.end;
+			continue;
+		}
 		const skip = omitted.get(i);
 		if (skip !== undefined) { i = skip; continue; }
 		if (source.startsWith('<!--', i)) {

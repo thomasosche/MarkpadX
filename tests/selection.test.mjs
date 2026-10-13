@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findSourceText, sourceTextWithMap, sourceToPlain, byteColToIndex, indexToByteCol } from '../src/lib/utils/selection.ts';
+import { findSourceText, sourceTextWithMap, sourceToPlain, sourceSelectionToPlain, byteColToIndex, indexToByteCol } from '../src/lib/utils/selection.ts';
 
 test('maps plain and Markdown-formatted phrases without changing source', () => {
 	for (const source of ['Product meets validation', 'Product **meets** validation']) {
@@ -68,4 +68,62 @@ test('wikilink aliases retain visible label offsets and exclude the target', () 
 	assert.equal(findSourceText(source, 'Hidden target').length, 0);
 	const [hit] = findSourceText(source, 'Visible label');
 	assert.equal(source.slice(hit.start, hit.end), 'Visible label');
+});
+
+test('inline code keeps HTML, entities, comments and link syntax literal', () => {
+	for (const text of ['<td>example</td>', '&amp; &#8805;', '<!-- visible -->', '[label](target)']) {
+		const source = `Before \`${text}\` after`;
+		const [hit] = findSourceText(source, text);
+		assert.equal(source.slice(hit.start, hit.end), text);
+		assert.equal(sourceToPlain(source), `Before ${text} after`);
+	}
+});
+
+test('code with multiple backticks and multiline contents retains source offsets', () => {
+	const source = '``<td>`example`</td>``';
+	const [hit] = findSourceText(source, '<td>`example`</td>');
+	assert.equal(source.slice(hit.start, hit.end), '<td>`example`</td>');
+	assert.equal(sourceToPlain(source), '<td>`example`</td>');
+	assert.equal(findSourceText('`<td>\nα 🧪</td>`', '<td> α 🧪</td>').length, 1);
+});
+
+test('backtick and tilde fences preserve literal contents and exclude fence info', () => {
+	for (const fence of ['```', '~~~~']) {
+		const text = '<td>&amp; α</td>\n[label](target)\n<!-- visible -->';
+		const source = `${fence}html\n${text}\n${fence}\n`;
+		const [hit] = findSourceText(source, text);
+		assert.equal(source.slice(hit.start, hit.end), text);
+		assert.equal(sourceToPlain(source), text + '\n');
+		assert.equal(findSourceText(source, 'html').length, 0);
+	}
+});
+
+test('unclosed fences extend to document end; shorter fences do not close', () => {
+	const source = '````html\n<td>first</td>\n```\n<td>last</td>';
+	assert.equal(findSourceText(source, '<td>last</td>').length, 1);
+	assert.equal(sourceToPlain(source), '<td>first</td>\n```\n<td>last</td>');
+});
+
+test('mixed code and real HTML keep distinct matches and decode only real HTML', () => {
+	const source = '`<td>&amp;</td>` then <td>&amp;</td>';
+	const [code] = findSourceText(source, '<td>&amp;</td>');
+	assert.equal(source.slice(code.start, code.end), '<td>&amp;</td>');
+	assert.equal(sourceToPlain(source), '<td>&amp;</td> then &');
+	assert.equal(findSourceText(source, '&').length, 2);
+});
+
+test('escaped and unmatched backticks do not suppress real HTML interpretation', () => {
+	for (const source of ['\\`<td>example</td>', '`<td>example</td>']) {
+		assert.equal(findSourceText(source, '<td>example</td>').length, 0);
+		assert.equal(findSourceText(source, 'example').length, 1);
+	}
+});
+
+test('selected code remains literal when selection excludes backtick delimiters', () => {
+	for (const source of ['`<td>&amp;</td>`', '```html\n<td>&amp;</td>\n```']) {
+		const start = source.indexOf('<td>');
+		const end = source.indexOf('</td>') + 5;
+		assert.equal(sourceSelectionToPlain(source, start, end), '<td>&amp;</td>');
+	}
+	assert.equal(sourceSelectionToPlain('<td>&amp;</td>', 0, 14), '&');
 });

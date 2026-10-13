@@ -48,9 +48,12 @@ try {
 		await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode, modifiers });
 	};
 	const source = '<h1>Navigation fixture</h1>\n<table>\n' + Array.from({ length: 180 }, (_, i) =>
-		`<tr><td data-row="${i}">${i === 10 || i === 140 ? 'Product&nbsp;<strong>meets</strong> validation' : `Requirement ${i}`}</td><td>Evidence ${i}</td></tr>`).join('\n') + '\n</table>';
+		`<tr><td data-row="${i}">${i === 10 || i === 140 ? 'Product&nbsp;<strong>meets</strong> validation' : `Requirement ${i}`}</td><td>Evidence ${i}</td></tr>`).join('\n') + '\n</table>\n\n`<td>example &amp;</td>`\n\n```html\n<td>fenced &amp;</td>\n```\n';
 	const bootstrap = `
 		window.fixture = { source: ${JSON.stringify(source)}, saves: 0, clipboardReads: 0, commands: [] };
+		// Fixed renderer fixtures model comrak's escaped code output; native rendering stays outside this browser test.
+		fixture.render = text => text.replace(${JSON.stringify('`<td>example &amp;</td>`')}, '<p><code>&lt;td&gt;example &amp;amp;&lt;/td&gt;</code></p>')
+			.replace(${JSON.stringify('```html\n<td>fenced &amp;</td>\n```')}, '<pre><code>&lt;td&gt;fenced &amp;amp;&lt;/td&gt;</code></pre>');
 		const callbacks = new Map(); let id = 0;
 		window.__TAURI_INTERNALS__ = {
 			metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
@@ -63,9 +66,9 @@ try {
 				if (cmd === 'get_os_type') return 'windows';
 				if (cmd === 'send_markdown_path') return ['C:/fixture/navigation.md'];
 				if (cmd === 'read_file_content') return fixture.source;
-				if (cmd === 'open_markdown_preview') return [fixture.source, fixture.source, true];
+				if (cmd === 'open_markdown_preview') return [fixture.source, fixture.render(fixture.source), true];
 				if (cmd === 'open_markdown') return fixture.source;
-				if (cmd === 'render_markdown') return args.content;
+				if (cmd === 'render_markdown') return fixture.render(args.content);
 				if (cmd === 'save_file_content') { fixture.source = args.content; fixture.saves++; return; }
 				if (cmd === 'clipboard_read_text') { fixture.clipboardReads++; return 'Product meets validation'; }
 				if (cmd === 'clipboard_read_image') return null;
@@ -177,6 +180,31 @@ try {
 	await sleep(600);
 	assert.ok(await evaluate(`(() => { const cell = document.querySelector('td[data-row="140"]'); const r = cell.getBoundingClientRect(); const v = document.querySelector('article.markdown-body').getBoundingClientRect(); return cell.textContent.includes('updated validation') && r.top >= v.top && r.bottom <= v.bottom; })()`));
 	console.log('PASS edit/save returns to updated table row');
+	for (const text of ['<td>example &amp;</td>', '<td>fenced &amp;</td>']) {
+		await evaluate(`(() => {
+			const el = Array.from(document.querySelectorAll('article.markdown-body code')).find(el => el.textContent === ${JSON.stringify(text)});
+			el.scrollIntoView({block:'center'});
+			const range = document.createRange(); range.selectNodeContents(el);
+			getSelection().removeAllRanges(); getSelection().addRange(range);
+		})()`);
+		await key('e', 'KeyE', 69);
+		await wait("!!document.querySelector('.monaco-editor')");
+		await sleep(200);
+		assert.equal(await evaluate('ed = monacoTest.editor.getEditors()[0]; ed.getModel().getValueInRange(ed.getSelection())'), text);
+		await key('f', 'KeyF', 70);
+		await wait("!!document.querySelector('.find-widget.visible')");
+		await evaluate("document.activeElement.select()");
+		await send('Input.insertText', { text });
+		await sleep(250);
+		assert.equal(await evaluate('ed.getModel().getValueInRange(ed.getSelection())'), text);
+		await key('Escape', 'Escape', 27, 0);
+		await key('e', 'KeyE', 69);
+		await wait("!document.querySelector('.monaco-editor')");
+		await sleep(500);
+		assert.equal(await evaluate('getSelection().toString()'), text);
+		assert.ok(await evaluate(`(() => { const r = getSelection().getRangeAt(0).getBoundingClientRect(); const v = document.querySelector('article.markdown-body').getBoundingClientRect(); return r.top >= v.top && r.bottom <= v.bottom; })()`));
+		console.log('PASS literal code Find and preview/editor round trip:', text);
+	}
 	await send('Browser.close');
 } finally {
 	ws?.close();
