@@ -90,6 +90,6 @@ formatted-text fallback, literal Find, preview return, repeated switching and ed
 position retention. It does not test native Rust rendering or the OS clipboard.
 It never launches the user's Markpad instance or accesses real documents.
 
-The manual `Navigation test executable (no release)` workflow builds a separate
-Windows executable and runs the existing native carry/tabsearch suites. It publishes
-only a temporary build artifact, never a release or installer.
+The existing manual `Test Build (No Release)` workflow can build a Windows-only
+standalone test executable. Native carry/tabsearch suites remain available for manual
+use with a built application; no extra navigation CI workflow is installed.

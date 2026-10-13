@@ -13,6 +13,8 @@ export type SourceSelection = {
 	occurrence: number;
 	/** Distance in px from the top of the source pane to the selection, to put it at the same height after the switch */
 	viewportOffset?: number;
+	/** Relative height survives different pane sizes and zoom levels. */
+	viewportRatio?: number;
 	/** Exact UTF-16 source offsets, when resolved from rendered text. */
 	sourceStart?: number;
 	sourceEnd?: number;

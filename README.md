@@ -62,7 +62,7 @@ Clickable links in the rendered preview — all paths are resolved relative to t
   rendered-text result strip navigates text separated by HTML or Markdown formatting.
   Native literal/regex/whole-word/Replace behavior remains separate.
 - Text selected in the rendered preview stays selected in the editor when switching to edit mode, and vice versa
-- The selection (or caret row) lands at the **same height on screen** as before the switch, instead of jumping
+- The selection (or caret row) stays at the **same relative height in the pane**, including while the editor layout settles after a zoom or mode change
 - A plain caret (no selection) is carried too: its row is located in the preview and briefly glows (about one second, then fades out completely) without changing the real selection
 - Works at every zoom level; in the editor the caret line is framed by a clearly visible border (built-in light and dark themes)
 - Without a visible selection in the preview, the editor opens on the row that was at the top of the preview

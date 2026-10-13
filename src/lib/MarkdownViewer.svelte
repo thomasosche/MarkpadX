@@ -1565,7 +1565,8 @@ import { t } from './utils/i18n.js';
 				startColumn: indexToByteCol(line, line.length),
 				occurrence: 0, globalOccurrence: sourceHits.indexOf(hit),
 				sourceStart: hit.start, sourceEnd: hit.end,
-				viewportOffset: selRect.top - bodyRect.top
+				viewportOffset: selRect.top - bodyRect.top,
+				viewportRatio: (selRect.top - bodyRect.top) / bodyRect.height
 			};
 		}
 		if (!startBlock || !startPos || !endPos) return null;
@@ -1580,6 +1581,7 @@ import { t } from './utils/i18n.js';
 			startColumn: startPos.startCol,
 			occurrence: findAll(normalize(before.toString()), normalize(text)).length,
 			viewportOffset: selRect.top - bodyRect.top,
+			viewportRatio: (selRect.top - bodyRect.top) / bodyRect.height,
 		};
 	}
 
@@ -1682,7 +1684,7 @@ import { t } from './utils/i18n.js';
 			const rects = target.getClientRects();
 			const rect = rects.length > 0 ? rects[0] : target.getBoundingClientRect();
 			y = rect.top - bodyRect.top;
-			height = rect.height;
+			height = target.getBoundingClientRect().height;
 		} else {
 			// No text match (blank or syntax-only line): interpolate inside the innermost element on the
 			// line, or fall back to the closest element above it
@@ -1713,8 +1715,9 @@ import { t } from './utils/i18n.js';
 			// the editor's viewportOffset, and convert only the final scroll distance.
 			const scale = previewScale(markdownBody);
 			const viewHeight = bodyRect.height;
-			const offset = info.viewportOffset !== undefined
-				? Math.max(0, Math.min(info.viewportOffset, viewHeight - 40))
+			const desired = info.viewportRatio !== undefined ? info.viewportRatio * viewHeight : info.viewportOffset;
+			const offset = desired !== undefined
+				? Math.max(0, Math.min(desired, viewHeight - Math.max(40, height)))
 				: viewHeight / 2 - height / 2;
 			const maxScroll = markdownBody.scrollHeight - markdownBody.clientHeight;
 			const startScroll = markdownBody.scrollTop;

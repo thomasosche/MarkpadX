@@ -2,9 +2,15 @@ name: Test Build (No Release)
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Build only a standalone Windows test app (no installer/release)
+        type: boolean
+        default: false
 
 jobs:
   build-test:
+    if: ${{ !inputs.windows_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -64,3 +70,31 @@ jobs:
             src-tauri/target/*/release/bundle/macos/*.app
             src-tauri/target/release/*.exe
           if-no-files-found: warn
+
+  windows-test-app:
+    if: ${{ inputs.windows_only }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - name: Build standalone test app with separate identity
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          $config = Join-Path $env:RUNNER_TEMP 'markpad-test-config.json'
+          @{ identifier = 'com.alecdotdev.markpad.navigation-test' } | ConvertTo-Json |
+            Set-Content -LiteralPath $config -Encoding utf8
+          npm run tauri build -- --no-bundle --config $config
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Markpad-test-app
+          path: src-tauri/target/release/Markpad.exe
+          if-no-files-found: error
+          retention-days: 7
