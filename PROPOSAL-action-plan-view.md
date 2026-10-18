@@ -5,7 +5,7 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2)
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2)
 - **Rejected 2026-10-18 (owner):** a "dim" state for done rows — rows are either shown or hidden, nothing in between
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
@@ -94,13 +94,14 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 - a table with no visible rows keeps its header row and shows the footer line as `all 88 rows hidden · show all` instead of collapsing silently.
 The footer line is part of the rendered DOM, so it scrolls with the table and is included in copy/paste and print of the view; it is never written to the file.
 
+**Keep the reading position on every filter or sort change** (decided 2026-10-18). Toggling Hide done, a chip, the text filter, the sort, a per-table `show all`, Reset, or entering and leaving the view must not jump to the top. Before the apply, pick an anchor: the first row that is at least partly inside the viewport and will still be visible after the apply, else the nearest such row above, else the nearest heading above. Record its offset from the viewport top. After the DOM pass, scroll so the anchor sits at the same offset, in the same animation frame, so there is no visible flicker. When the anchor row itself was hidden by the change (for example you were reading a 🟢 row and switched Hide done on), the next visible row above takes its place. This reuses the reading-position and line-map code that already keeps the viewed line across live reloads.
+
 **Tables-only mode** (optional second toggle in the bar): hides paragraphs, lists and blockquotes between the first `##` section and the Annexes heading, keeping headings and tables — a pure worklist. Off by default; phase 1 if cheap, otherwise phase 2.
 
 ### 4.3 Usability and performance suggestions (proposed 2026-10-18, not yet decided)
 
 Usability:
 - **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
-- **Keep the reading position** on every filter change: anchor on the first visible row in the viewport and scroll it back after the apply (reuse the reading-position / line-map code).
 - **"Mine" quick filter:** a setting with the user's owner tokens (`TO`, `PM/TO`, `Thomas Osche`) becomes one chip.
 - **Sticky table header rows** while a long table scrolls; the bar itself is pinned.
 - **Visible sort cue:** arrow in the sorted column header and a `sorted by status` tag, so the view order is never mistaken for the file order.
