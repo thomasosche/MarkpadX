@@ -5,7 +5,7 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2)
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2)
 - **Rejected 2026-10-18 (owner):** a "dim" state for done rows — rows are either shown or hidden, nothing in between
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
@@ -68,17 +68,17 @@ The skill's status vocabulary, which the view treats as authoritative:
 One row, wraps on narrow windows, same visual language as the preview search bar:
 
 ```
-[≡ Action plan]  Hide done ☑   Status: 🔴 🟡 🟩 🟢 ⚪   Sev: MAJOR MINOR DOC   Owner: [any ▾]   Table: [all ▾]
-                 Find: [ G2 / DEC- / text ]   Sort: [Status ▾] ↓   shown 23 / 88   [Reset]  [×]
+[≡ Action plan]  Hide done ☑   Status: 🔴 🟡 🟩 🟢 ⚪   Sev: MAJOR MINOR DOC   Table: [all ▾]
+                 Owner: [ to…  ▸ TO 23 · PM/TO 4 ]   Find: [ G2 / DEC- / text ]   Sort: [Status ▾] ↓   shown 23 / 88   [Reset]  [×]
 ```
 
 | Control | Behaviour |
 |---|---|
 | **Hide done** | One checkbox: hides 🟢 and ⚪ rows. A small caret opens "also hide 🟩 implemented in draft". Default on when the view is entered (setting). |
 | **Status chips** | Multi-select, shown with the plan's own icons. Clicking a chip toggles it; Hide done is just a preset that unselects 🟢 ⚪. Rows whose status cannot be classified are **never hidden** (shown with a grey "?" chip so the gap is visible). |
-| **Count badges** (decided 2026-10-18) | Every chip carries its row count: `🔴 45 · 🟡 17 · 🟩 3 · 🟢 71 · ⚪ 6`, likewise on the Sev chips and in the Owner and Table dropdowns. Counts are totals over the whole document, not over the current filter, so they answer "how much is open" before anything is clicked; the `shown n / total` counter shows the filtered result. Recomputed from the row model on every render. |
+| **Count badges** (decided 2026-10-18) | Every chip carries its row count: `🔴 45 · 🟡 17 · 🟩 3 · 🟢 71 · ⚪ 6`, likewise on the Sev chips, the Owner suggestions and the Table dropdown. Counts are totals over the whole document, not over the current filter, so they answer "how much is open" before anything is clicked; the `shown n / total` counter shows the filtered result. Recomputed from the row model on every render. |
 | **Sev chips** | Filter only, never a sort key. Values found in the document (`MAJOR`, `MINOR`, `DOC`; anything else, e.g. a plan-specific `Critical`, shows as its own chip). Hidden when no table has a Sev column. |
-| **Owner** | Dropdown of distinct owner values from the document (`Owner` / `Resp.` / `Responsible`). Multi-select. |
+| **Owner** (decided 2026-10-18: search box) | A text box `Owner…` with type-ahead over the distinct owner values of the document (`Owner` / `Resp.` / `Responsible` / decider in `Date / by`), each suggestion with its row count (`TO 23`, `PM/TO 4`, `QM 7`). Typing filters immediately by substring, case-insensitive, so `to` matches `TO`, `PM/TO` and `T. Osche`; Enter or clicking a suggestion pins it as a chip and clears the box, several chips combine with OR. Owner cells that list several people (`TO / QM`) match on any of them. An × on each chip removes it. |
 | **Table** | `all` · `Open Issues` · `Decision Log` · `Document status` · `Checklist` · plus one entry per table that could not be classified (named by the heading above it). |
 | **Find** | Substring match over ID + text cells, case-insensitive. `G2` matches the ID `G2` exactly first; `DEC-` matches all decisions. Rows that do not match are hidden, not dimmed. |
 | **Sort** | `Document order` (default) · `Status` (open first, see §5.4) · `Owner` · `ID` (natural: G2 < G10). Second click flips direction. Sorting is **within each table**; tables never merge. |
@@ -102,7 +102,6 @@ The footer line is part of the rendered DOM, so it scrolls with the table and is
 
 Usability:
 - **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
-- **"Mine" quick filter:** a setting with the user's owner tokens (`TO`, `PM/TO`, `Thomas Osche`) becomes one chip.
 - **Sticky table header rows** while a long table scrolls; the bar itself is pinned.
 - **Visible sort cue:** arrow in the sorted column header and a `sorted by status` tag, so the view order is never mistaken for the file order.
 - **Keyboard flow:** Ctrl+Shift+A opens the view and focuses Find; Esc clears Find first, second Esc leaves the view (same as the search bar); chips are toggle buttons with a pressed state.
