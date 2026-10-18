@@ -3489,7 +3489,10 @@ import { t } from './utils/i18n.js';
 						{/if}
 
 						{#if apOn && tabManager.activeTab?.actionPlan}
-							<ActionPlanBar bind:this={apBar} bind:view={tabManager.activeTab.actionPlan} model={apModel} shown={apShown} onchange={() => applyActionPlan()} onclose={toggleActionPlanView} />
+							<!-- the 36px title-bar padding of the layout container is zoomed with the content; below 100% the bar would slide under the tab strip -->
+							<div class="ap-bar-wrap" style="padding-top: {Math.max(0, 36 / (zoomLevel / 100) - 36)}px">
+								<ActionPlanBar bind:this={apBar} bind:view={tabManager.activeTab.actionPlan} model={apModel} shown={apShown} onchange={() => applyActionPlan()} onclose={toggleActionPlanView} />
+							</div>
 						{/if}
 						<div class="viewer-content">
 							<article
@@ -4540,4 +4543,5 @@ import { t } from './utils/i18n.js';
 		outline: 2px solid rgba(255, 165, 0, 0.9);
 		border-radius: 0;
 	}
+	.ap-bar-wrap { flex-shrink: 0; background: var(--color-canvas-default); }
 </style>
