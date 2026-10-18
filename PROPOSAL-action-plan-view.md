@@ -5,7 +5,8 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Owner decision needed:** the remaining open questions in §9
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1)
+- **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
 ---
 
@@ -74,6 +75,7 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 |---|---|
 | **Hide done** | One checkbox: hides 🟢 and ⚪ rows. A small caret opens "also hide 🟩 implemented in draft". Default on when the view is entered (setting). |
 | **Status chips** | Multi-select, shown with the plan's own icons. Clicking a chip toggles it; Hide done is just a preset that unselects 🟢 ⚪. Rows whose status cannot be classified are **never hidden** (shown with a grey "?" chip so the gap is visible). |
+| **Count badges** (decided 2026-10-18) | Every chip carries its row count: `🔴 45 · 🟡 17 · 🟩 3 · 🟢 71 · ⚪ 6`, likewise on the Sev chips and in the Owner and Table dropdowns. Counts are totals over the whole document, not over the current filter, so they answer "how much is open" before anything is clicked; the `shown n / total` counter shows the filtered result. Recomputed from the row model on every render. |
 | **Sev chips** | Filter only, never a sort key. Values found in the document (`MAJOR`, `MINOR`, `DOC`; anything else, e.g. a plan-specific `Critical`, shows as its own chip). Hidden when no table has a Sev column. |
 | **Owner** | Dropdown of distinct owner values from the document (`Owner` / `Resp.` / `Responsible`). Multi-select. |
 | **Table** | `all` · `Open Issues` · `Decision Log` · `Document status` · `Checklist` · plus one entry per table that could not be classified (named by the heading above it). |
@@ -87,7 +89,32 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 
 **Tables-only mode** (optional second toggle in the bar): hides paragraphs, lists and blockquotes between the first `##` section and the Annexes heading, keeping headings and tables — a pure worklist. Off by default; phase 1 if cheap, otherwise phase 2.
 
-### 4.3 What does not change
+### 4.3 Usability and performance suggestions (proposed 2026-10-18, not yet decided)
+
+Usability:
+- **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
+- **Filtered tables must not look short:** a muted line under each filtered table, `23 of 88 rows hidden · show`, plus the hidden count in the heading badge.
+- **Dim as a third state** for done rows (low opacity instead of hidden) to keep the audit trail visible while scanning.
+- **Keep the reading position** on every filter change: anchor on the first visible row in the viewport and scroll it back after the apply (reuse the reading-position / line-map code).
+- **"Mine" quick filter:** a setting with the user's owner tokens (`TO`, `PM/TO`, `Thomas Osche`) becomes one chip.
+- **Sticky table header rows** while a long table scrolls; the bar itself is pinned.
+- **Visible sort cue:** arrow in the sorted column header and a `sorted by status` tag, so the view order is never mistaken for the file order.
+- **Keyboard flow:** Ctrl+Shift+A opens the view and focuses Find; Esc clears Find first, second Esc leaves the view (same as the search bar); chips are toggle buttons with a pressed state.
+- **Legend-driven tooltips:** chip tooltips come from the plan's own `Legend:` line.
+- **Compact rows option:** single-line cells with ellipsis, expand on click.
+- **Row to source:** a hover icon that jumps to the row's source line in split/edit view (sourcepos is already there; Ctrl+E on a focused row does it today).
+
+Performance:
+- **Parse once per render**, right after the Markdown render where the task-checkbox listeners are attached; filter and sort touch only the model and the DOM, never the Rust renderer.
+- **One animation frame per apply:** set `hidden` and re-append sorted rows in a single pass with no layout reads inside the loop.
+- **Debounce only the Find box** (~100 ms, like the search bar); chip clicks apply synchronously.
+- **Preview search skips hidden rows by DOM test** (`closest('tr[hidden]')`), not by geometry.
+- **Badges and counts derive from the same model**, no second DOM query.
+- **Per-row data in a `WeakMap`** keyed by the row element, so nothing leaks across re-renders.
+- **Reapply, do not rebuild, on live reload.**
+- **Budget test:** an e2e check that Hide done plus a status sort on the SP3 plan applies in under one frame.
+
+### 4.4 What does not change
 
 - Edit mode and split view: the bar lives in the preview pane only; in split view it filters the preview, the editor is unaffected.
 - Outline (TOC) reads headings from the DOM; headings stay, so the outline is unchanged.
@@ -197,7 +224,7 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 3. **Decision Log under Hide done:** hide 🟢 DECIDED rows too, or keep decisions always visible? Proposal: hide; the Table filter can show them.
 4. **Count badges:** view-only, or also a `Write counts to headings` action that rewrites `(d done / o open)` in the source (phase 2, same safety net)? Proposal: view-only in phase 1.
 5. **Tables-only mode:** phase 1 or 2?
-6. **Shortcut:** Ctrl+Shift+A acceptable, or prefer a plain `A` like the `?` shortcut dialog?
+6. ~~**Shortcut:** Ctrl+Shift+A acceptable, or prefer a plain `A` like the `?` shortcut dialog?~~ *Decided 2026-10-18: Ctrl+Shift+A.*
 
 ## 10. Not in scope
 
