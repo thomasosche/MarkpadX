@@ -5,7 +5,7 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2); Compact rows switch on the bar (§4.2); sort cue in the column header and track heading (§4.2); unknown status treated like ⚪ (§5.3); no Hide done control, status chips are the quick filter with Shift+click = only this / all back (§4.2); no Table dropdown (§4.2)
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2); Compact rows switch on the bar (§4.2); sort cue in the column header and track heading (§4.2); unclassifiable status is ⚪ no action, no separate class or chip (§5.3); no Hide done control, status chips are the quick filter with Shift+click = only this / all back (§4.2); no Table dropdown (§4.2)
 - **Rejected 2026-10-18 (owner):** a "dim" state for done rows — rows are either shown or hidden, nothing in between
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
@@ -15,7 +15,7 @@
 
 A per-tab **Action Plan view** for the preview. When switched on, a slim **filter and sort bar** appears above the rendered document (the slot the Ctrl+F search bar already uses). The bar works on the plan's tables — Decision Log, Open Issues, Document Status, Consistency Checklist — and lets you:
 
-- **hide done or closed rows** with one click on the status chips (🟢 ⚪ and the `?` chip start deselected),
+- **hide done or closed rows** with one click on the status chips (🟢 and ⚪ start deselected),
 - **filter** by status, severity, owner, table and free text (ID or substring),
 - **sort** by status (open first), owner or ID, and go back to document order,
 - see **live counts** (`shown 23 / 88`, and `done / open` on each `###` track heading).
@@ -68,13 +68,13 @@ The skill's status vocabulary, which the view treats as authoritative:
 One row, wraps on narrow windows, same visual language as the preview search bar:
 
 ```
-[≡ Action plan]  Status: [🔴 45] [🟡 17] [🟩 3]  🟢 71   ⚪ 6   ? 1    Sev: [MAJOR 30] [MINOR 51] [DOC 7]
+[≡ Action plan]  Status: [🔴 45] [🟡 17] [🟩 3]  🟢 71   ⚪ 7    Sev: [MAJOR 30] [MINOR 51] [DOC 7]
                  Owner: [ to…  ▸ TO 23 · PM/TO 4 ]   Find: [ G2 / DEC- / text ]   Sort: [Status ▾] ↓   Compact ☐   shown 23 / 88   [Reset]  [×]
 ```
 
 | Control | Behaviour |
 |---|---|
-| **Status chips** | The quick filter; there is no separate Hide done control (decided 2026-10-18). One chip per legend icon plus the dashed `?` chip, each with its count. **Click** toggles that chip. **Shift+click** selects only that chip and deselects all others in the section; **Shift+click on the sole selected chip** brings all others back (decided 2026-10-18). On entering the view 🔴 🟡 🟩 are selected and 🟢 ⚪ `?` deselected (setting), which is the "open work only" view. Rows whose status cannot be classified are **treated like ⚪** (decided 2026-10-18): deselected by default and sorted with ⚪. The dashed "?" chip on the bar always shows their count, even when hidden, so a malformed status is always discoverable and can be fixed in the file. |
+| **Status chips** | The quick filter; there is no separate Hide done control (decided 2026-10-18). One chip per legend icon, each with its count. **Click** toggles that chip. **Shift+click** selects only that chip and deselects all others in the section; **Shift+click on the sole selected chip** brings all others back (decided 2026-10-18). On entering the view 🔴 🟡 🟩 are selected and 🟢 ⚪ deselected (setting), which is the "open work only" view. A status cell that cannot be classified **is ⚪ no action** (decided 2026-10-18): it counts in the ⚪ chip, hides and sorts with ⚪, and there is no separate chip for it. The cell itself carries a small grey `?` mark with a tooltip naming the problem, and the ⚪ chip tooltip says how many of its rows are unclassified, so the text can be corrected in the file. |
 | **Count badges** (decided 2026-10-18) | Every chip carries its row count: `🔴 45 · 🟡 17 · 🟩 3 · 🟢 71 · ⚪ 6`, likewise on the Sev chips and the Owner suggestions. Counts are totals over the whole document, not over the current filter, so they answer "how much is open" before anything is clicked; the `shown n / total` counter shows the filtered result. Recomputed from the row model on every render. |
 | **Sev chips** | Filter only, never a sort key. Values found in the document (`MAJOR`, `MINOR`, `DOC`; anything else, e.g. a plan-specific `Critical`, shows as its own chip). Hidden when no table has a Sev column. |
 | **Owner** (decided 2026-10-18: search box) | A text box `Owner…` with type-ahead over the distinct owner values of the document (`Owner` / `Resp.` / `Responsible` / decider in `Date / by`), each suggestion with its row count (`TO 23`, `PM/TO 4`, `QM 7`). Typing filters immediately by substring, case-insensitive, so `to` matches `TO`, `PM/TO` and `T. Osche`; Enter or clicking a suggestion pins it as a chip and clears the box, several chips combine with OR. Owner cells that list several people (`TO / QM`) match on any of them. An × on each chip removes it. |
@@ -152,7 +152,7 @@ Table kind: `issues` if it has `sev` or its `id` values look like `[A-Z]{1,4}-?\
 
 ### 5.3 Status normalisation
 
-Five classes, one per legend icon. Order of evidence inside the status cell: **icon first** (the skill makes the icon mandatory and first in the cell), **then skill keyword**, **then legacy keyword**, else `unknown`.
+Five classes, one per legend icon. Order of evidence inside the status cell: **icon first** (the skill makes the icon mandatory and first in the cell), **then skill keyword**, **then legacy keyword**, else ⚪ `none`.
 
 | Class | Icon | Skill keywords (authoritative) | Legacy fallback (icon-less SP2 / SN2 / CPA plans, until migrated) |
 |---|---|---|---|
@@ -160,16 +160,15 @@ Five classes, one per legend icon. Order of evidence inside the status cell: **i
 | `progress` | 🟡 | `PARTIALLY CLOSED`, `PARTIAL`, `Draft` (document tables) | `In progress` |
 | `draft` | 🟩 | `IMPLEMENTED IN DRAFT` | — |
 | `done` | 🟢 | `DONE`, `CLOSED`, `DECIDED`, `PASS`, `Released` | ✅, `Complete`, `Resolved` |
-| `none` | ⚪ | `NOT NEEDED`, `Tracked via CR DOC`, `SUPERSEDED` | `deferred`, `moot`, `n/a` |
-| `unknown` | — | anything else; treated like ⚪ for hiding, sorting and counts; marked with a grey "?" chip in the cell | |
+| `none` | ⚪ | `NOT NEEDED`, `Tracked via CR DOC`, `SUPERSEDED` | `deferred`, `moot`, `n/a`; **and anything not classifiable at all** (no icon, no keyword), marked `?` in the cell |
 
-Keyword matching is case-insensitive and word-bounded. A cell whose icon and keyword disagree (e.g. `🟢 Open`) is classified by the icon and flagged with the "?" chip, since the skill says the icon is the definition. On entering the view the `done`, `none` and `unknown` chips are deselected (setting `defaultStatuses`), so the first view is open work only.
+Keyword matching is case-insensitive and word-bounded. A cell whose icon and keyword disagree (e.g. `🟢 Open`) is classified by the icon and marked `?` in the cell, since the skill says the icon is the definition. On entering the view the `done` and `none` chips are deselected (setting `defaultStatuses`), so the first view is open work only.
 
 ### 5.4 Sort keys
 
 There is no priority sort (owner decision, §3). `Sort: Status` orders by the status class, most urgent first, with document order as the only tie-break:
 
-1. **Status class:** `open` < `progress` < `draft` < `done` < `none` = `unknown`.
+1. **Status class:** `open` < `progress` < `draft` < `done` < `none`.
 2. **Document order** (stable; also what `Document order` uses alone).
 
 Rows named as the top blocker in the header `**Status:**` line are not moved by the sort; instead they get a small "blocker" badge in the ID cell so they stand out wherever they are. `Sort: Owner` uses (owner, document order); `Sort: ID` splits the id into prefix + number and compares naturally. `Sev` never enters a sort key.
@@ -177,7 +176,7 @@ Rows named as the top blocker in the header `**Status:**` line are not moved by 
 ### 5.5 Invariants
 
 - The source is never modified by filtering or sorting. Only phase 2 status edits write to the in-memory tab content, and only on an explicit click.
-- A row whose status cannot be classified behaves like ⚪ everywhere (hide, sort, counts) and carries a "?" chip; the bar's "?" count is never hidden, so a malformed status is always discoverable.
+- A row whose status cannot be classified is ⚪ no action everywhere (chip, hide, sort, counts); the `?` mark in its cell and the ⚪ chip tooltip are the only traces, so correcting the file is the fix.
 - Document order is always restorable without re-rendering.
 - Reapplying the same view state to a fresh render yields the same result (pure function of raw content + view state).
 - View state lives in the tab, nowhere else: a file open always starts with the view off and defaults; closing the tab discards the state; no global or per-file memory.
@@ -196,7 +195,7 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 | 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { defaultStatuses: ['open','progress','draft'], compactDefault: false, defaultSort: 'document' }` — the bar's defaults when the view is switched on; persisted like the other settings. No auto-enter setting (§4.1). |
 | 7 | `src/lib/utils/i18n.ts` | English keys under `actionPlan.*`; other languages fall back to English until translated. |
 | 8 | `src/styles.css` | Bar styling (reuse `.preview-search-bar` tokens), `tr.ap-hidden`, heading badge, muted `no rows match` row. |
-| 9 | `tests/actionPlan.test.mjs` (new) | Status classification for every skill value and every legacy fallback, icon-over-keyword precedence and the disagreement flag, column aliasing for the four table shapes above, status ordering with stable document-order tie-break, natural ID sort, chip click / Shift+click only-this toggle, unknown status treated like ⚪ with its bar count kept, top-blocker detection from the header line. Fixtures: trimmed header + table excerpts from the SP3, EMC, SN2, CPA and SP2 plans (no content beyond what the test needs). |
+| 9 | `tests/actionPlan.test.mjs` (new) | Status classification for every skill value and every legacy fallback, icon-over-keyword precedence and the disagreement flag, column aliasing for the four table shapes above, status ordering with stable document-order tie-break, natural ID sort, chip click / Shift+click only-this toggle, unclassifiable status folded into ⚪ with the cell mark, top-blocker detection from the header line. Fixtures: trimmed header + table excerpts from the SP3, EMC, SN2, CPA and SP2 plans (no content beyond what the test needs). |
 | 10 | `tests/e2e/actionplan.mjs` (phase 1 end) | Open a fixture plan, toggle view, Shift+click 🔴, check row counts and badge text, sort by status, reload, assert state survives. |
 
 **Rebase note (I-03).** Everything new is additive (three new files + small hooks), so it ports onto the upstream 2.8.4 base unchanged; upstream also renders with comrak and sourcepos. Do not couple the bar to the current single-file viewer beyond the two hook points (mount + post-render apply).
@@ -213,7 +212,7 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 
 - **Column drift between plans.** Mitigated by aliases plus the `other` table kind; an unrecognised table is still listed and filterable by text, never silently dropped.
 - **Multi-line cells (`<br>`), bold and wiki links in cells.** The adapter reads `textContent`, so markup is irrelevant; the ID cell is trimmed of `**`, `[[…|` and `]]` before matching.
-- **Rows the renderer splits oddly** (unbalanced pipes). Those rows show as `unknown` and remain visible — the view degrades to "nothing hidden", never to "wrong row hidden".
+- **Rows the renderer splits oddly** (unbalanced pipes). Those rows fall into ⚪ and are hidden with it by default; the `?` cell mark and the ⚪ tooltip count make them findable by selecting the ⚪ chip.
 - **Preview search interplay.** Hidden rows must be excluded from matches or the current-match counter jumps to invisible text; covered by the e2e test.
 - **Performance.** The largest plan has about 400 rows; hide/reorder in one `requestAnimationFrame` batch is well below one frame. No virtualisation needed.
 
