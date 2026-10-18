@@ -5,7 +5,7 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2)
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2); Compact rows switch on the bar (§4.2); sort cue in the column header and track heading (§4.2)
 - **Rejected 2026-10-18 (owner):** a "dim" state for done rows — rows are either shown or hidden, nothing in between
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
@@ -69,7 +69,7 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 
 ```
 [≡ Action plan]  Hide done ☑   Status: 🔴 🟡 🟩 🟢 ⚪   Sev: MAJOR MINOR DOC   Table: [all ▾]
-                 Owner: [ to…  ▸ TO 23 · PM/TO 4 ]   Find: [ G2 / DEC- / text ]   Sort: [Status ▾] ↓   shown 23 / 88   [Reset]  [×]
+                 Owner: [ to…  ▸ TO 23 · PM/TO 4 ]   Find: [ G2 / DEC- / text ]   Sort: [Status ▾] ↓   Compact ☐   shown 23 / 88   [Reset]  [×]
 ```
 
 | Control | Behaviour |
@@ -81,7 +81,8 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 | **Owner** (decided 2026-10-18: search box) | A text box `Owner…` with type-ahead over the distinct owner values of the document (`Owner` / `Resp.` / `Responsible` / decider in `Date / by`), each suggestion with its row count (`TO 23`, `PM/TO 4`, `QM 7`). Typing filters immediately by substring, case-insensitive, so `to` matches `TO`, `PM/TO` and `T. Osche`; Enter or clicking a suggestion pins it as a chip and clears the box, several chips combine with OR. Owner cells that list several people (`TO / QM`) match on any of them. An × on each chip removes it. |
 | **Table** | `all` · `Open Issues` · `Decision Log` · `Document status` · `Checklist` · plus one entry per table that could not be classified (named by the heading above it). |
 | **Find** | Substring match over ID + text cells, case-insensitive. `G2` matches the ID `G2` exactly first; `DEC-` matches all decisions. Rows that do not match are hidden, not dimmed. |
-| **Sort** | `Document order` (default) · `Status` (open first, see §5.4) · `Owner` · `ID` (natural: G2 < G10). Second click flips direction. Sorting is **within each table**; tables never merge. |
+| **Sort** | `Document order` (default) · `Status` (open first, see §5.4) · `Owner` · `ID` (natural: G2 < G10). Second click flips direction. Sorting is **within each table**; tables never merge. **Sort cue** (decided 2026-10-18): the sorted column's header cell shows ▲/▼ and each track heading gets a `sorted by status` tag, so the view order is never mistaken for the file order. |
+| **Compact rows** (decided 2026-10-18) | A switch on the bar. On: every cell except ID and Status is a single line with ellipsis; clicking a row expands it (click again to collapse). Off: full cells as rendered. Part of the per-tab state, default off (setting). |
 | **Counts** | `shown n / total`. Each `###` heading that owns a table gets a live badge `(d done / o open · s shown)` computed from the rows, next to the hand-written count — mismatch is visible at a glance. |
 | **Reset** | Document order, all statuses, no text, Hide done per setting. |
 | **×** | Leaves the view; the document renders as before. |
@@ -103,10 +104,8 @@ The footer line is part of the rendered DOM, so it scrolls with the table and is
 Usability:
 - **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
 - **Sticky table header rows** while a long table scrolls; the bar itself is pinned.
-- **Visible sort cue:** arrow in the sorted column header and a `sorted by status` tag, so the view order is never mistaken for the file order.
 - **Keyboard flow:** Ctrl+Shift+A opens the view and focuses Find; Esc clears Find first, second Esc leaves the view (same as the search bar); chips are toggle buttons with a pressed state.
 - **Legend-driven tooltips:** chip tooltips come from the plan's own `Legend:` line.
-- **Compact rows option:** single-line cells with ellipsis, expand on click.
 - **Row to source:** a hover icon that jumps to the row's source line in split/edit view (sourcepos is already there; Ctrl+E on a focused row does it today).
 
 Performance:
@@ -197,7 +196,7 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 | 3 | `src/lib/components/ActionPlanBar.svelte` (new) | The bar. Props: `tables`, `state` (`$bindable`), `onchange`, `onclose`. Owner/Sev/Table options derived from `tables`. |
 | 4 | `src/lib/MarkdownViewer.svelte` | Per-tab `actionPlanView` state (in `tabs.svelte.ts` next to `isEditing`); mount the bar in the preview-search slot; call `applyView` after every render (where task listeners are attached); Ctrl+Shift+A; exclude hidden rows from preview search. |
 | 5 | `src/lib/components/TitleBar.svelte` | Toggle button beside the edit toggle, ready-dot when `isActionPlan` is true; kebab entry. |
-| 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { hideDoneDefault: true, hideDraftDefault: false, defaultSort: 'document' }` — the bar's defaults when the view is switched on; persisted like the other settings. No auto-enter setting (§4.1). |
+| 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { hideDoneDefault: true, hideDraftDefault: false, compactDefault: false, defaultSort: 'document' }` — the bar's defaults when the view is switched on; persisted like the other settings. No auto-enter setting (§4.1). |
 | 7 | `src/lib/utils/i18n.ts` | English keys under `actionPlan.*`; other languages fall back to English until translated. |
 | 8 | `src/styles.css` | Bar styling (reuse `.preview-search-bar` tokens), `tr.ap-hidden`, heading badge, muted `no rows match` row. |
 | 9 | `tests/actionPlan.test.mjs` (new) | Status classification for every skill value and every legacy fallback, icon-over-keyword precedence and the disagreement flag, column aliasing for the four table shapes above, status ordering with stable document-order tie-break, natural ID sort, Hide-done presets, unknown-status never hidden, top-blocker detection from the header line. Fixtures: trimmed header + table excerpts from the SP3, EMC, SN2, CPA and SP2 plans (no content beyond what the test needs). |
