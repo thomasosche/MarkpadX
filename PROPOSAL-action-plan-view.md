@@ -4,6 +4,7 @@
 - **Date:** 2026-10-18
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
+- **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
 - **Owner decision needed:** the remaining open questions in §9
 
 ---
@@ -56,8 +57,9 @@ The skill's status vocabulary, which the view treats as authoritative:
 ### 4.1 Entering the view
 
 - **Toolbar button** in the title bar next to the edit toggle (list-with-filter icon), **Ctrl+Shift+A** (free; checked against `Shortcuts.svelte`), and an entry in the kebab menu. Toggles per tab, like edit mode.
-- **Auto-offer:** when a tab opens a file whose name starts with `_Action_Plan` or contains `action plan`, or whose first lines carry a `**Status:**` and a `**Legend:**` line, the toolbar button is shown active-ready (subtle dot). The view is **not** switched on automatically — a setting `Open action plans in Action Plan view` (default off) can make it so.
-- The toggle is remembered per tab for the session (in the tab store), not in the file and not globally.
+- **Default on file open is the plain Markdown rendering** (owner decision, 2026-10-18). Every file open starts with the view off and the bar at its defaults: a newly opened file, a reopened tab (Ctrl+Shift+T), a tab restored at app start, and a file dropped onto the window. There is no auto-enter and no setting that changes this.
+- **Auto-offer only:** when the opened file is detected as an action plan (§5.1), the toolbar button shows a subtle ready dot so the view is one click away. Nothing else changes.
+- **Remembered per tab while the tab is open:** view on/off, Hide done, the status / Sev / Owner / Table chips, the text filter, and the sort with its direction. Switching tabs and coming back, switching to edit or split view and back, F5 and live reload all keep the selection. Closing the tab forgets it. The selection is never written to the file and never shared between tabs, even for the same file in two tabs.
 
 ### 4.2 The bar
 
@@ -150,6 +152,7 @@ Rows named as the top blocker in the header `**Status:**` line are not moved by 
 - A row whose status cannot be classified is always shown.
 - Document order is always restorable without re-rendering.
 - Reapplying the same view state to a fresh render yields the same result (pure function of raw content + view state).
+- View state lives in the tab, nowhere else: a file open always starts with the view off and defaults; closing the tab discards the state; no global or per-file memory.
 
 ## 6. Implementation
 
@@ -162,7 +165,7 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 | 3 | `src/lib/components/ActionPlanBar.svelte` (new) | The bar. Props: `tables`, `state` (`$bindable`), `onchange`, `onclose`. Owner/Sev/Table options derived from `tables`. |
 | 4 | `src/lib/MarkdownViewer.svelte` | Per-tab `actionPlanView` state (in `tabs.svelte.ts` next to `isEditing`); mount the bar in the preview-search slot; call `applyView` after every render (where task listeners are attached); Ctrl+Shift+A; exclude hidden rows from preview search. |
 | 5 | `src/lib/components/TitleBar.svelte` | Toggle button beside the edit toggle, ready-dot when `isActionPlan` is true; kebab entry. |
-| 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { hideDoneDefault: true, hideDraftDefault: false, autoEnter: false, defaultSort: 'document' }`, persisted like the other settings. |
+| 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { hideDoneDefault: true, hideDraftDefault: false, defaultSort: 'document' }` — the bar's defaults when the view is switched on; persisted like the other settings. No auto-enter setting (§4.1). |
 | 7 | `src/lib/utils/i18n.ts` | English keys under `actionPlan.*`; other languages fall back to English until translated. |
 | 8 | `src/styles.css` | Bar styling (reuse `.preview-search-bar` tokens), `tr.ap-hidden`, heading badge, muted `no rows match` row. |
 | 9 | `tests/actionPlan.test.mjs` (new) | Status classification for every skill value and every legacy fallback, icon-over-keyword precedence and the disagreement flag, column aliasing for the four table shapes above, status ordering with stable document-order tie-break, natural ID sort, Hide-done presets, unknown-status never hidden, top-blocker detection from the header line. Fixtures: trimmed header + table excerpts from the SP3, EMC, SN2, CPA and SP2 plans (no content beyond what the test needs). |
