@@ -1,6 +1,6 @@
 # Proposal — Action Plan view mode with a dynamic filter and sort bar
 
-- **Status:** proposal (not decided) · see `IDEAS.md` I-09
+- **Status:** phase 1 implemented on this branch (2026-10-18): `src/lib/utils/actionPlan.ts`, `actionPlanDom.ts`, `components/ActionPlanBar.svelte`, hooks in `MarkdownViewer.svelte` / `TitleBar.svelte`, tests in `tests/actionPlan.test.mjs`; owner testing · see `IDEAS.md` I-09
 - **Date:** 2026-10-18
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
