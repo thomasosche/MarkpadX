@@ -1438,7 +1438,7 @@ body {
 
 /* ---- Action Plan view (see PROPOSAL-action-plan-view.md) ---- */
 .markdown-body tr[hidden] { display: none; }
-.markdown-body.ap-view thead th { position: sticky; top: 0; z-index: 2; }
+.markdown-body.ap-view thead th { position: sticky; top: 0; z-index: 2; padding-top: 12px; padding-bottom: 12px; background: color-mix(in srgb, var(--color-canvas-subtle) 70%, transparent); backdrop-filter: blur(2px); }
 .markdown-body.ap-view td.ap-id { white-space: nowrap; }
 .markdown-body.ap-view .ap-sortcue { color: var(--color-accent-fg); font-size: 10px; margin-left: 4px; }
 .markdown-body.ap-compact td:not(.ap-id) { max-width: 34ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
