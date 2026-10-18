@@ -380,15 +380,15 @@ The `carry` (68 cases) and `reload` (42 cases) suites were moved from a scratch 
 
 **What**
 - A per-tab preview mode for BME action plans (`_Action_Plan_*.md`): a filter and sort bar above the document that hides done/closed rows (🟢 / ⚪, optionally 🟩), filters by status, severity, owner, table and text, sorts by status (open first) / owner / ID, and shows live done/open counts per track heading. The BME Action Plan Skill defines status but no priority, so there is no priority sort (owner decision 2026-10-18).
-- DOM-only: the Markdown source is never reordered or changed (rows stay in place per the BME Action Plan Skill). Selection is remembered per tab while open; every file open starts as plain Markdown with the view off (owner decision 2026-10-18). Phase 2 adds an in-place status edit per row via `data-sourcepos`, with the task-checkbox safety net and no auto-save.
+- DOM-only: the Markdown source is never reordered or changed (rows stay in place per the BME Action Plan Skill). Selection is remembered per tab while open; every file open starts as plain Markdown with the view off; every chip carries its row count (owner decisions 2026-10-18). Further usability/performance suggestions in proposal §4.3. Phase 2 adds an in-place status edit per row via `data-sourcepos`, with the task-checkbox safety net and no auto-save.
 
 **Why**
 Six active plans with 20–100+ rows keep closed rows in place as the audit trail, so the file cannot be tidied; the viewer has to.
 
 **Notes (how it could be built)**
 - Pure logic in `src/lib/utils/actionPlan.ts` (tested with `node --test` like `tasks.ts`), DOM adapter in `actionPlanDom.ts`, bar in `ActionPlanBar.svelte`, two hook points in `MarkdownViewer.svelte` (mount in the search-bar slot, re-apply after every render). comrak already emits `data-sourcepos` on `<tr>`.
-- Shortcut Ctrl+Shift+A (free). Additive, so it ports onto the I-03 rebase unchanged.
+- Shortcut Ctrl+Shift+A (confirmed 2026-10-18). Additive, so it ports onto the I-03 rebase unchanged.
 - Estimate: phase 1 ~1.5 days, phase 2 ~1 day.
 
 **Open questions**
-See proposal §9: default sort (document order vs status), Hide-done default, Decision Log handling, count badges view-only vs. written back, Tables-only mode phase, shortcut.
+See proposal §9: default sort (document order vs status), Hide-done default, Decision Log handling, count badges view-only vs. written back, Tables-only mode phase.
