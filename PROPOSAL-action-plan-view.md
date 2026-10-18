@@ -6,6 +6,7 @@
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
 - **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2)
+- **Rejected 2026-10-18 (owner):** a "dim" state for done rows — rows are either shown or hidden, nothing in between
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
 ---
@@ -99,7 +100,6 @@ The footer line is part of the rendered DOM, so it scrolls with the table and is
 
 Usability:
 - **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
-- **Dim as a third state** for done rows (low opacity instead of hidden) to keep the audit trail visible while scanning.
 - **Keep the reading position** on every filter change: anchor on the first visible row in the viewport and scroll it back after the apply (reuse the reading-position / line-map code).
 - **"Mine" quick filter:** a setting with the user's owner tokens (`TO`, `PM/TO`, `Thomas Osche`) becomes one chip.
 - **Sticky table header rows** while a long table scrolls; the bar itself is pinned.
