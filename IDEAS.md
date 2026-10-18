@@ -379,7 +379,7 @@ The `carry` (68 cases) and `reload` (42 cases) suites were moved from a scratch 
 - **Proposal:** `PROPOSAL-action-plan-view.md` (branch `claude/action-plan-view-d163a815`)
 
 **What**
-- A per-tab preview mode for BME action plans (`_Action_Plan_*.md`): a filter and sort bar above the document that hides done/closed rows (🟢 / ⚪, optionally 🟩), filters by status, severity, owner (type-ahead search box), table and text, sorts by status (open first) / owner / ID, and shows live done/open counts per track heading. The BME Action Plan Skill defines status but no priority, so there is no priority sort (owner decision 2026-10-18).
+- A per-tab preview mode for BME action plans (`_Action_Plan_*.md`): a filter and sort bar above the document that hides done/closed rows (🟢 / ⚪, optionally 🟩), filters by status chips (click toggles, Shift+click = only this / all back), severity, owner (type-ahead search box) and text, sorts by status (open first) / owner / ID, and shows live done/open counts per track heading. The BME Action Plan Skill defines status but no priority, so there is no priority sort (owner decision 2026-10-18).
 - DOM-only: the Markdown source is never reordered or changed (rows stay in place per the BME Action Plan Skill). Selection is remembered per tab while open; every file open starts as plain Markdown with the view off; every chip carries its row count; a filtered table always shows how many rows are hidden, with a per-table "show all" (owner decisions 2026-10-18). Further usability/performance suggestions in proposal §4.3. Phase 2 adds an in-place status edit per row via `data-sourcepos`, with the task-checkbox safety net and no auto-save.
 
 **Why**

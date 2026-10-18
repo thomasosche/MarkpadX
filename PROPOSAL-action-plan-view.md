@@ -5,7 +5,7 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2); Compact rows switch on the bar (§4.2); sort cue in the column header and track heading (§4.2); unknown status treated like ⚪ (§5.3)
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2); the reading position is kept on every filter or sort change (§4.2); the Owner filter is a type-ahead search box with counted suggestions, replacing the dropdown and the "Mine" chip idea (§4.2); Compact rows switch on the bar (§4.2); sort cue in the column header and track heading (§4.2); unknown status treated like ⚪ (§5.3); no Hide done control, status chips are the quick filter with Shift+click = only this / all back (§4.2); no Table dropdown (§4.2)
 - **Rejected 2026-10-18 (owner):** a "dim" state for done rows — rows are either shown or hidden, nothing in between
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
@@ -15,7 +15,7 @@
 
 A per-tab **Action Plan view** for the preview. When switched on, a slim **filter and sort bar** appears above the rendered document (the slot the Ctrl+F search bar already uses). The bar works on the plan's tables — Decision Log, Open Issues, Document Status, Consistency Checklist — and lets you:
 
-- **hide done or closed rows** (🟢 / ⚪, optionally 🟩 "implemented in draft") with one click,
+- **hide done or closed rows** with one click on the status chips (🟢 ⚪ and the `?` chip start deselected),
 - **filter** by status, severity, owner, table and free text (ID or substring),
 - **sort** by status (open first), owner or ID, and go back to document order,
 - see **live counts** (`shown 23 / 88`, and `done / open` on each `###` track heading).
@@ -61,30 +61,28 @@ The skill's status vocabulary, which the view treats as authoritative:
 - **Toolbar button** in the title bar next to the edit toggle (list-with-filter icon), **Ctrl+Shift+A** (free; checked against `Shortcuts.svelte`), and an entry in the kebab menu. Toggles per tab, like edit mode.
 - **Default on file open is the plain Markdown rendering** (owner decision, 2026-10-18). Every file open starts with the view off and the bar at its defaults: a newly opened file, a reopened tab (Ctrl+Shift+T), a tab restored at app start, and a file dropped onto the window. There is no auto-enter and no setting that changes this.
 - **Auto-offer only:** when the opened file is detected as an action plan (§5.1), the toolbar button shows a subtle ready dot so the view is one click away. Nothing else changes.
-- **Remembered per tab while the tab is open:** view on/off, Hide done, the status / Sev / Owner / Table chips, the text filter, and the sort with its direction. Switching tabs and coming back, switching to edit or split view and back, F5 and live reload all keep the selection. Closing the tab forgets it. The selection is never written to the file and never shared between tabs, even for the same file in two tabs.
+- **Remembered per tab while the tab is open:** view on/off, the status / Sev / Owner chips, Compact rows, the text filter, and the sort with its direction. Switching tabs and coming back, switching to edit or split view and back, F5 and live reload all keep the selection. Closing the tab forgets it. The selection is never written to the file and never shared between tabs, even for the same file in two tabs.
 
 ### 4.2 The bar
 
 One row, wraps on narrow windows, same visual language as the preview search bar:
 
 ```
-[≡ Action plan]  Hide done ☑   Status: 🔴 🟡 🟩 🟢 ⚪   Sev: MAJOR MINOR DOC   Table: [all ▾]
+[≡ Action plan]  Status: [🔴 45] [🟡 17] [🟩 3]  🟢 71   ⚪ 6   ? 1    Sev: [MAJOR 30] [MINOR 51] [DOC 7]
                  Owner: [ to…  ▸ TO 23 · PM/TO 4 ]   Find: [ G2 / DEC- / text ]   Sort: [Status ▾] ↓   Compact ☐   shown 23 / 88   [Reset]  [×]
 ```
 
 | Control | Behaviour |
 |---|---|
-| **Hide done** | One checkbox: hides 🟢 and ⚪ rows. A small caret opens "also hide 🟩 implemented in draft". Default on when the view is entered (setting). |
-| **Status chips** | Multi-select, shown with the plan's own icons. Clicking a chip toggles it; Hide done is just a preset that unselects 🟢 ⚪. Rows whose status cannot be classified are **treated like ⚪** (decided 2026-10-18): Hide done hides them and they sort with ⚪. The dashed "?" chip on the bar always shows their count, even when hidden, so a malformed status is always discoverable and can be fixed in the file. |
-| **Count badges** (decided 2026-10-18) | Every chip carries its row count: `🔴 45 · 🟡 17 · 🟩 3 · 🟢 71 · ⚪ 6`, likewise on the Sev chips, the Owner suggestions and the Table dropdown. Counts are totals over the whole document, not over the current filter, so they answer "how much is open" before anything is clicked; the `shown n / total` counter shows the filtered result. Recomputed from the row model on every render. |
+| **Status chips** | The quick filter; there is no separate Hide done control (decided 2026-10-18). One chip per legend icon plus the dashed `?` chip, each with its count. **Click** toggles that chip. **Shift+click** selects only that chip and deselects all others in the section; **Shift+click on the sole selected chip** brings all others back (decided 2026-10-18). On entering the view 🔴 🟡 🟩 are selected and 🟢 ⚪ `?` deselected (setting), which is the "open work only" view. Rows whose status cannot be classified are **treated like ⚪** (decided 2026-10-18): deselected by default and sorted with ⚪. The dashed "?" chip on the bar always shows their count, even when hidden, so a malformed status is always discoverable and can be fixed in the file. |
+| **Count badges** (decided 2026-10-18) | Every chip carries its row count: `🔴 45 · 🟡 17 · 🟩 3 · 🟢 71 · ⚪ 6`, likewise on the Sev chips and the Owner suggestions. Counts are totals over the whole document, not over the current filter, so they answer "how much is open" before anything is clicked; the `shown n / total` counter shows the filtered result. Recomputed from the row model on every render. |
 | **Sev chips** | Filter only, never a sort key. Values found in the document (`MAJOR`, `MINOR`, `DOC`; anything else, e.g. a plan-specific `Critical`, shows as its own chip). Hidden when no table has a Sev column. |
 | **Owner** (decided 2026-10-18: search box) | A text box `Owner…` with type-ahead over the distinct owner values of the document (`Owner` / `Resp.` / `Responsible` / decider in `Date / by`), each suggestion with its row count (`TO 23`, `PM/TO 4`, `QM 7`). Typing filters immediately by substring, case-insensitive, so `to` matches `TO`, `PM/TO` and `T. Osche`; Enter or clicking a suggestion pins it as a chip and clears the box, several chips combine with OR. Owner cells that list several people (`TO / QM`) match on any of them. An × on each chip removes it. |
-| **Table** | `all` · `Open Issues` · `Decision Log` · `Document status` · `Checklist` · plus one entry per table that could not be classified (named by the heading above it). |
 | **Find** | Substring match over ID + text cells, case-insensitive. `G2` matches the ID `G2` exactly first; `DEC-` matches all decisions. Rows that do not match are hidden, not dimmed. |
 | **Sort** | `Document order` (default) · `Status` (open first, see §5.4) · `Owner` · `ID` (natural: G2 < G10). Second click flips direction. Sorting is **within each table**; tables never merge. **Sort cue** (decided 2026-10-18): the sorted column's header cell shows ▲/▼ and each track heading gets a `sorted by status` tag, so the view order is never mistaken for the file order. |
 | **Compact rows** (decided 2026-10-18) | A switch on the bar. On: every cell except ID and Status is a single line with ellipsis; clicking a row expands it (click again to collapse). Off: full cells as rendered. Part of the per-tab state, default off (setting). |
 | **Counts** | `shown n / total`. Each `###` heading that owns a table gets a live badge `(d done / o open · s shown)` computed from the rows, next to the hand-written count — mismatch is visible at a glance. |
-| **Reset** | Document order, all statuses, no text, Hide done per setting. |
+| **Reset** | Document order, chips to their entry defaults, no owner, no text, Compact per setting, per-table overrides cleared. The button shows the number of active filters. |
 | **×** | Leaves the view; the document renders as before. |
 
 **Row rendering.** Hidden rows get `hidden` (not removed), sorted rows are re-appended inside their `tbody` in the new order; the original index is kept on each row so document order is restorable without a re-render. Headings, prose, Gantt annex and everything outside tables are untouched.
@@ -95,14 +93,13 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 - a table with no visible rows keeps its header row and shows the footer line as `all 88 rows hidden · show all` instead of collapsing silently.
 The footer line is part of the rendered DOM, so it scrolls with the table and is included in copy/paste and print of the view; it is never written to the file.
 
-**Keep the reading position on every filter or sort change** (decided 2026-10-18). Toggling Hide done, a chip, the text filter, the sort, a per-table `show all`, Reset, or entering and leaving the view must not jump to the top. Before the apply, pick an anchor: the first row that is at least partly inside the viewport and will still be visible after the apply, else the nearest such row above, else the nearest heading above. Record its offset from the viewport top. After the DOM pass, scroll so the anchor sits at the same offset, in the same animation frame, so there is no visible flicker. When the anchor row itself was hidden by the change (for example you were reading a 🟢 row and switched Hide done on), the next visible row above takes its place. This reuses the reading-position and line-map code that already keeps the viewed line across live reloads.
+**Keep the reading position on every filter or sort change** (decided 2026-10-18). Toggling a chip, the text filter, the sort, a per-table `show all`, Reset, or entering and leaving the view must not jump to the top. Before the apply, pick an anchor: the first row that is at least partly inside the viewport and will still be visible after the apply, else the nearest such row above, else the nearest heading above. Record its offset from the viewport top. After the DOM pass, scroll so the anchor sits at the same offset, in the same animation frame, so there is no visible flicker. When the anchor row itself was hidden by the change (for example you were reading a 🟢 row and switched Hide done on), the next visible row above takes its place. This reuses the reading-position and line-map code that already keeps the viewed line across live reloads.
 
 **Tables-only mode** (optional second toggle in the bar): hides paragraphs, lists and blockquotes between the first `##` section and the Annexes heading, keeping headings and tables — a pure worklist. Off by default; phase 1 if cheap, otherwise phase 2.
 
 ### 4.3 Usability and performance suggestions (proposed 2026-10-18, not yet decided)
 
 Usability:
-- **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
 - **Sticky table header rows** while a long table scrolls; the bar itself is pinned.
 - **Keyboard flow:** Ctrl+Shift+A opens the view and focuses Find; Esc clears Find first, second Esc leaves the view (same as the search bar); chips are toggle buttons with a pressed state.
 - **Legend-driven tooltips:** chip tooltips come from the plan's own `Legend:` line.
@@ -116,7 +113,7 @@ Performance:
 - **Badges and counts derive from the same model**, no second DOM query.
 - **Per-row data in a `WeakMap`** keyed by the row element, so nothing leaks across re-renders.
 - **Reapply, do not rebuild, on live reload.**
-- **Budget test:** an e2e check that Hide done plus a status sort on the SP3 plan applies in under one frame.
+- **Budget test:** an e2e check that deselecting 🟢 plus a status sort on the SP3 plan applies in under one frame.
 
 ### 4.4 What does not change
 
@@ -151,7 +148,7 @@ For every `<table>` in `.markdown-body`: read the `<th>` texts, normalise (lower
 | `owner` | `owner`, `resp`, `resp.`, `responsible`, `who`, `date / by` (decisions: decider only) |
 | `text` | `issue`, `gap`, `decision`, `action`, `action / recommendation`, `remediation`, `next steps`, `how to verify`, `basis`, `ref`, `ref (§/wi)`, and any extra column (e.g. `legacy priority / phase`) — all concatenated for Find |
 
-Table kind: `issues` if it has `sev` or its `id` values look like `[A-Z]{1,4}-?\d+`; `decisions` if ids start with `DEC-`; `documents` if the id header is `document`; `checks` if `check`; else `other`. The nearest preceding heading (`h2`/`h3`) names the table in the Table dropdown and carries the count badge.
+Table kind: `issues` if it has `sev` or its `id` values look like `[A-Z]{1,4}-?\d+`; `decisions` if ids start with `DEC-`; `documents` if the id header is `document`; `checks` if `check`; else `other`. The nearest preceding heading (`h2`/`h3`) carries the count badge; the kind is used for counts and tests only, there is no table selector in the bar (decided 2026-10-18).
 
 ### 5.3 Status normalisation
 
@@ -166,7 +163,7 @@ Five classes, one per legend icon. Order of evidence inside the status cell: **i
 | `none` | ⚪ | `NOT NEEDED`, `Tracked via CR DOC`, `SUPERSEDED` | `deferred`, `moot`, `n/a` |
 | `unknown` | — | anything else; treated like ⚪ for hiding, sorting and counts; marked with a grey "?" chip in the cell | |
 
-Keyword matching is case-insensitive and word-bounded. A cell whose icon and keyword disagree (e.g. `🟢 Open`) is classified by the icon and flagged with the "?" chip, since the skill says the icon is the definition. "Hide done" hides `done`, `none` and `unknown`; the caret option adds `draft`.
+Keyword matching is case-insensitive and word-bounded. A cell whose icon and keyword disagree (e.g. `🟢 Open`) is classified by the icon and flagged with the "?" chip, since the skill says the icon is the definition. On entering the view the `done`, `none` and `unknown` chips are deselected (setting `defaultStatuses`), so the first view is open work only.
 
 ### 5.4 Sort keys
 
@@ -196,11 +193,11 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 | 3 | `src/lib/components/ActionPlanBar.svelte` (new) | The bar. Props: `tables`, `state` (`$bindable`), `onchange`, `onclose`. Owner/Sev/Table options derived from `tables`. |
 | 4 | `src/lib/MarkdownViewer.svelte` | Per-tab `actionPlanView` state (in `tabs.svelte.ts` next to `isEditing`); mount the bar in the preview-search slot; call `applyView` after every render (where task listeners are attached); Ctrl+Shift+A; exclude hidden rows from preview search. |
 | 5 | `src/lib/components/TitleBar.svelte` | Toggle button beside the edit toggle, ready-dot when `isActionPlan` is true; kebab entry. |
-| 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { hideDoneDefault: true, hideDraftDefault: false, compactDefault: false, defaultSort: 'document' }` — the bar's defaults when the view is switched on; persisted like the other settings. No auto-enter setting (§4.1). |
+| 6 | `src/lib/stores/settings.svelte.ts`, `Settings.svelte` | `actionPlan: { defaultStatuses: ['open','progress','draft'], compactDefault: false, defaultSort: 'document' }` — the bar's defaults when the view is switched on; persisted like the other settings. No auto-enter setting (§4.1). |
 | 7 | `src/lib/utils/i18n.ts` | English keys under `actionPlan.*`; other languages fall back to English until translated. |
 | 8 | `src/styles.css` | Bar styling (reuse `.preview-search-bar` tokens), `tr.ap-hidden`, heading badge, muted `no rows match` row. |
-| 9 | `tests/actionPlan.test.mjs` (new) | Status classification for every skill value and every legacy fallback, icon-over-keyword precedence and the disagreement flag, column aliasing for the four table shapes above, status ordering with stable document-order tie-break, natural ID sort, Hide-done presets, unknown status treated like ⚪ with its bar count kept, top-blocker detection from the header line. Fixtures: trimmed header + table excerpts from the SP3, EMC, SN2, CPA and SP2 plans (no content beyond what the test needs). |
-| 10 | `tests/e2e/actionplan.mjs` (phase 1 end) | Open a fixture plan, toggle view, hide done, check row counts and badge text, sort by priority, reload, assert state survives. |
+| 9 | `tests/actionPlan.test.mjs` (new) | Status classification for every skill value and every legacy fallback, icon-over-keyword precedence and the disagreement flag, column aliasing for the four table shapes above, status ordering with stable document-order tie-break, natural ID sort, chip click / Shift+click only-this toggle, unknown status treated like ⚪ with its bar count kept, top-blocker detection from the header line. Fixtures: trimmed header + table excerpts from the SP3, EMC, SN2, CPA and SP2 plans (no content beyond what the test needs). |
+| 10 | `tests/e2e/actionplan.mjs` (phase 1 end) | Open a fixture plan, toggle view, Shift+click 🔴, check row counts and badge text, sort by status, reload, assert state survives. |
 
 **Rebase note (I-03).** Everything new is additive (three new files + small hooks), so it ports onto the upstream 2.8.4 base unchanged; upstream also renders with comrak and sourcepos. Do not couple the bar to the current single-file viewer beyond the two hook points (mount + post-render apply).
 
@@ -208,7 +205,7 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 
 | Phase | Content | Estimate |
 |---|---|---|
-| **1 — View** | Detection, bar, Hide done, status/sev/owner/table/text filters, all sorts, counts and badges, per-tab state, reapply on reload, unit tests | ~1.5 days |
+| **1 — View** | Detection, bar, status/sev/owner/text filters, all sorts, counts and badges, per-tab state, reapply on reload, unit tests | ~1.5 days |
 | **2 — Edit** | Click a status cell → popover with the five icons; writes `🔴 Open` → `🟢 DONE` on that row's source line via `data-sourcepos` with the same safety net as task toggles (line must still contain the status the cell showed, else refuse with a toast); in memory until Ctrl+S, no auto-save. Also: `Export filtered view`, Tables-only mode if not in phase 1 | ~1 day |
 | **3 — Across plans** | Folder-pane filter `action plans only`; a generated overview tab listing every `_Action_Plan*.md` in the folder with its `Status:` line and open counts (read-only) | idea, size later |
 
@@ -224,8 +221,8 @@ Follows the existing patterns (`tasks.ts` + `tests/tasks.test.mjs`, preview sear
 
 1. **Default sort on entering the view:** document order (safe, matches the file) or status (open first)? Proposal: document order, with the last used sort remembered per session.
    *Decided 2026-10-18: no priority sort; the view focuses on status (§3, §5.4).*
-2. **Hide done default:** on when entering the view? Proposal: on, hide 🟩 draft off.
-3. **Decision Log under Hide done:** hide 🟢 DECIDED rows too, or keep decisions always visible? Proposal: hide; the Table filter can show them.
+2. ~~**Hide done default**~~ *Decided 2026-10-18: no Hide done control; the status chips are the quick filter, entering the view selects 🔴 🟡 🟩 only.*
+3. **Decision Log under the default chips:** hide 🟢 DECIDED rows too, or keep decisions always visible? Proposal: hide; clicking the 🟢 chip shows them again.
 4. **Count badges:** view-only, or also a `Write counts to headings` action that rewrites `(d done / o open)` in the source (phase 2, same safety net)? Proposal: view-only in phase 1.
 5. **Tables-only mode:** phase 1 or 2?
 6. ~~**Shortcut:** Ctrl+Shift+A acceptable, or prefer a plain `A` like the `?` shortcut dialog?~~ *Decided 2026-10-18: Ctrl+Shift+A.*
