@@ -130,3 +130,111 @@ test('isActionPlanDoc, blockerIds, parseLegend', () => {
 	assert.equal(legend.open, '🔴 open');
 	assert.match(legend.none, /no active action/);
 });
+
+// ---- second batch (2026-10-18): edge cases around vocabulary, filters and sorting ----
+
+test('classifyStatus: coverage-checklist and document-status wording, keyword precedence', () => {
+	assert.equal(classifyStatus('🔴 FAIL').cls, 'open');
+	assert.equal(classifyStatus('🔴 NOT-EVIDENCED').cls, 'open');
+	assert.equal(classifyStatus('🟡 PARTIAL').cls, 'progress');
+	assert.equal(classifyStatus('🟡 Draft').cls, 'progress');
+	assert.equal(classifyStatus('🟢 Released').cls, 'done');
+	assert.equal(classifyStatus('🔴 Planned').cls, 'open');
+	// legacy, no icon: the draft phrase wins over the bare "draft" keyword, "closed" is not "partially closed"
+	assert.equal(classifyStatus('IMPLEMENTED IN DRAFT — DSR-12-001 §8.1').cls, 'draft');
+	assert.equal(classifyStatus('PARTIALLY CLOSED — 2 of 5 points').cls, 'progress');
+	assert.equal(classifyStatus('CLOSED — Rev 3').cls, 'done');
+	// a word inside another word does not count
+	assert.equal(classifyStatus('reopened').cls, 'none');
+	assert.equal(classifyStatus('').cls, 'none');
+	assert.match(classifyStatus('').flag, /not classifiable/);
+});
+
+test('classifyStatus: a legacy keyword never overrides an icon, icons anywhere after text still count', () => {
+	assert.equal(classifyStatus('DONE 🔴').cls, 'open'); // icon wins even when not first
+	assert.equal(classifyStatus('🟡 DONE — waiting for release').cls, 'progress');
+	assert.match(classifyStatus('🟡 DONE — waiting for release').flag, /says "done"/);
+});
+
+test('mapColumns: coverage checklist (Result), "#" id column, state alias, unknown headers fall back to column 0', () => {
+	const cov = mapColumns(['Area (§ ref)', 'Result', 'Notes']);
+	assert.deepEqual([cov.id, cov.status], [0, 1]);
+	const hash = mapColumns(['#', 'Action', 'Status']);
+	assert.deepEqual([hash.id, hash.status], [0, 2]);
+	const state = mapColumns(['Item', 'Who', 'State']);
+	assert.deepEqual([state.id, state.owner, state.status], [0, 1, 2]);
+	assert.equal(mapColumns(['Gap', 'Remediation', 'Owner', 'Status']).id, 0);
+});
+
+test('classifyTable: mixed ids without Sev are "other", CPL/IPL style ids are issues', () => {
+	assert.equal(classifyTable('ID', ['G1', 'Appendix A'], false), 'other');
+	assert.equal(classifyTable('ID', ['CPL-3', 'IPL-12', 'CY2'], false), 'issues');
+	assert.equal(classifyTable('ID', [], false), 'other');
+	assert.equal(classifyTable('ID', ['DEC-01', 'G1'], false), 'issues'); // one non-DEC id: not a decision log
+});
+
+test('cleanId and splitOwners: wiki link without alias, bold inside link, separators', () => {
+	assert.equal(cleanId('[[G7]]'), 'G7');
+	assert.equal(cleanId('**[[_PCA-25-001|PCA-25-001]]**'), 'PCA-25-001');
+	assert.equal(cleanId('  B-01\n'), 'B-01');
+	assert.deepEqual(splitOwners('TO, QM and RA'), ['TO', 'QM', 'RA']);
+	assert.deepEqual(splitOwners('SW Lead; RA'), ['SW Lead', 'RA']);
+	assert.deepEqual(splitOwners(''), []);
+});
+
+test('sortRows: owner and id sorts, descending flips, empty owners sort first ascending', () => {
+	const rows = [
+		row(0, { id: 'G10', owner: 'QM' }), row(1, { id: 'G2', owner: '' }), row(2, { id: 'G1', owner: 'RA' }), row(3, { id: 'DEC-3', owner: 'QM' }),
+	];
+	assert.deepEqual(sortRows(rows, 'id', 'asc').map((r) => r.id), ['DEC-3', 'G1', 'G2', 'G10']);
+	assert.deepEqual(sortRows(rows, 'id', 'desc').map((r) => r.id), ['G10', 'G2', 'G1', 'DEC-3']);
+	assert.deepEqual(sortRows(rows, 'owner', 'asc').map((r) => r.index), [1, 0, 3, 2]); // empty < QM (doc order inside QM) < RA
+	assert.deepEqual(rows.map((r) => r.index), [0, 1, 2, 3]); // input untouched
+});
+
+test('toggleChip: deselecting the last selected chip is allowed, Shift+click on another chip narrows to it', () => {
+	const all = ['MAJOR', 'MINOR', 'DOC'];
+	assert.deepEqual(toggleChip(['MAJOR'], 'MAJOR', all, false), []);
+	assert.deepEqual(toggleChip(['MAJOR'], 'DOC', all, true), ['DOC']);
+	assert.deepEqual(toggleChip([], 'DOC', all, false), ['DOC']);
+});
+
+test('rowMatches: filters combine with AND, owner chips with OR, override is per table index', () => {
+	const st = { ...defaultViewState(), owners: ['TO', 'QM'], find: 'ifu' };
+	const r = row(0, { owners: ['QM'], text: 'h2 ifu lacks mr statement' });
+	assert.equal(rowMatches(r, st, 0), true);
+	assert.equal(rowMatches(row(1, { owners: ['RA'], text: 'ifu' }), st, 0), false); // owner fails
+	assert.equal(rowMatches(row(2, { owners: ['TO'], text: 'label' }), st, 0), false); // find fails
+	const done = row(3, { cls: 'done' });
+	assert.equal(rowMatches(done, { ...defaultViewState(), overrides: [2] }, 1), false);
+	assert.equal(rowMatches(done, { ...defaultViewState(), overrides: [2] }, 2), true);
+	// an empty Sev filter means no Sev filter; a row without Sev passes any Sev filter
+	assert.equal(rowMatches(row(4, { sev: '' }), { ...defaultViewState(), sevs: ['MAJOR'] }, 0), true);
+	// live owner query is a substring match, case-insensitive
+	assert.equal(rowMatches(row(5, { owners: ['PM/TO'] }), { ...defaultViewState(), ownerQuery: 'pm' }, 0), true);
+	assert.equal(rowMatches(row(6, { owners: ['QM'] }), { ...defaultViewState(), ownerQuery: 'pm' }, 0), false);
+});
+
+test('activeFilterCount counts every departure from the entry defaults', () => {
+	const st = defaultViewState();
+	assert.equal(activeFilterCount({ ...st, statuses: ['open'] }), 1);
+	assert.equal(activeFilterCount({ ...st, statuses: ['draft', 'progress', 'open'] }), 0); // same set, other order
+	assert.equal(activeFilterCount({ ...st, compact: true, overrides: [0, 3], ownerQuery: 'to', find: ' ' }), 4);
+	assert.equal(activeFilterCount({ ...st, sevs: ['MAJOR'], owners: ['TO', 'QM'], sort: 'id', dir: 'desc' }), 4);
+});
+
+test('isActionPlanDoc: name match is case-insensitive, header check only looks at the first 40 lines', () => {
+	assert.equal(isActionPlanDoc('', 'C:\\x\\action-plan-2026.md'), true);
+	assert.equal(isActionPlanDoc('', 'ActionPlan_CPA-23-001-Rev2_DEKRA-2026.md'), true);
+	const late = Array(45).fill('text').join('\n') + '\n**Status:** 🔴\n**Legend:** 🔴 open';
+	assert.equal(isActionPlanDoc(late, 'notes.md'), false);
+	assert.equal(isActionPlanDoc('# T\n**Status:** 🟢 COMPLETE\n\nno legend here', 'notes.md'), false);
+});
+
+test('blockerIds and parseLegend: no false ids from dates or document numbers, legend without an icon part', () => {
+	const ids = blockerIds('🔴 Active — closing NC TDR02/R6-01 (2026-10-15), see RAN-23-001 Rev 2 and P8, P9');
+	assert.ok(ids.has('P8') && ids.has('P9') && ids.has('RAN-23-001'));
+	assert.ok(!ids.has('2026') && !ids.has('15'));
+	assert.deepEqual(parseLegend('Legend: open · done'), {});
+	assert.equal(parseLegend('**Legend:** 🟩 implemented in draft (→ 🟢 on release) · ⚪ no active action').draft, '🟩 implemented in draft (→ 🟢 on release)');
+});

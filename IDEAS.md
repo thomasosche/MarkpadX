@@ -374,21 +374,29 @@ The `carry` (68 cases) and `reload` (42 cases) suites were moved from a scratch 
 
 ## I-09 · Action Plan view mode with a dynamic filter and sort bar
 
-- **Status:** in progress — phase 1 implemented on the branch (2026-10-18), owner testing the debug build
+- **Status:** in progress — phase 1 implemented on branch `claude/action-plan-view-d163a815` (2026-10-18), owner testing the debug build; documented in `README.md` → Action Plan View
 - **Added:** 2026-10-18
-- **Proposal:** `PROPOSAL-action-plan-view.md` (branch `claude/action-plan-view-d163a815`)
 
 **What**
-- A per-tab preview mode for BME action plans (`_Action_Plan_*.md`): a filter and sort bar above the document that hides done/closed rows (🟢 / ⚪, optionally 🟩), filters by status chips (click toggles, Shift+click = only this / all back), severity, owner (type-ahead search box) and text, sorts by status (open first) / owner / ID, and shows live done/open counts per track heading. The BME Action Plan Skill defines status but no priority, so there is no priority sort (owner decision 2026-10-18).
-- DOM-only: the Markdown source is never reordered or changed (rows stay in place per the BME Action Plan Skill). Selection is remembered per tab while open; every file open starts as plain Markdown with the view off; every chip carries its row count; a filtered table always shows how many rows are hidden, with a per-table "show all" (owner decisions 2026-10-18). Further usability/performance suggestions in proposal §4.3. Phase 2 adds an in-place status edit per row via `data-sourcepos`, with the task-checkbox safety net and no auto-save.
+- A per-tab preview mode for BME action plans (`_Action_Plan_*.md`): a filter and sort bar above the document, working on every table with a `Status` column. Status chips with counts are the quick filter (click toggles, Shift+click = only this one / all back; entering selects 🔴 🟡 🟩), plus Sev chips, an owner type-ahead box, a Find box, sort by status / owner / ID within each table, a Compact switch, hidden-row footers with per-table show all, computed done/open badges on track headings, sticky table headers, reading position kept, `Ctrl+Shift+A`.
+- DOM-only: the Markdown source is never reordered or changed (rows stay in place per the BME Action Plan Skill). State is per tab while open; every file open starts as plain Markdown.
 
 **Why**
 Six active plans with 20–100+ rows keep closed rows in place as the audit trail, so the file cannot be tidied; the viewer has to.
 
-**Notes (how it could be built)**
-- Pure logic in `src/lib/utils/actionPlan.ts` (tested with `node --test` like `tasks.ts`), DOM adapter in `actionPlanDom.ts`, bar in `ActionPlanBar.svelte`, two hook points in `MarkdownViewer.svelte` (mount in the search-bar slot, re-apply after every render). comrak already emits `data-sourcepos` on `<tr>`.
-- Shortcut Ctrl+Shift+A (confirmed 2026-10-18). Additive, so it ports onto the I-03 rebase unchanged.
-- Estimate: phase 1 ~1.5 days, phase 2 ~1 day.
+**Owner decisions (2026-10-18)**
+- Status focus, no priority: the BME Action Plan Skill defines status vocabularies but no priority field. Sev is a filter only.
+- No Hide-done control and no Table selector: the status chips are the quick filter.
+- A status cell that cannot be classified is ⚪ no action (counted in the ⚪ chip, `?` mark in the cell); no separate class or chip. Rows are shown or hidden, never dimmed.
+- Owner filter is a type-ahead search box with counted suggestions; count badges on every chip.
+- A filtered table always shows how many rows are hidden, with a per-table show all. Reading position kept on every change. Compact rows as a bar switch. Sort cue in the column header. Sticky table header taller with a 70% grey background.
+- Shortcut `Ctrl+Shift+A`.
 
-**Open questions**
-See proposal §9: default sort (document order vs status), Hide-done default, Decision Log handling, count badges view-only vs. written back, Tables-only mode phase.
+**How it is built**
+- Pure logic `src/lib/utils/actionPlan.ts` (classification, column aliases, chip semantics, matching, sorting; `tests/actionPlan.test.mjs`), DOM adapter `src/lib/utils/actionPlanDom.ts` (collect rows, apply view, keep position), bar `src/lib/components/ActionPlanBar.svelte`, hooks in `MarkdownViewer.svelte` (bar above the viewer content, re-apply after every render, keys, search skips hidden rows) and `TitleBar.svelte` (toggle button with ready dot). Tab state field `actionPlan` on `Tab`, dropped on session restore. Additive, so it ports onto the I-03 rebase unchanged.
+
+**Open / phase 2**
+- Settings UI for the entry defaults (chips, compact, sort); translations beyond English; an e2e test.
+- Phase 2: in-place status edit per row via `data-sourcepos` with the task-checkbox safety net and no auto-save; export of the filtered view; tables-only mode.
+- Not yet decided: whether 🟢 DECIDED rows hide with the default chips (today they do); count badges view-only (today) or written back to the headings.
+- Further suggestions not yet decided: cross-reference jumps for IDs in text with a hover peek; filter from cells (click an owner / Sev / status); copy the filtered view as Markdown; change toast on live reload; click a heading badge to jump; plan Status line pinned under the bar; empty state with Reset; narrow-window collapse of the bar; status tint on the row edge.
