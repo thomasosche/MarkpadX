@@ -122,7 +122,7 @@ export function naturalIdCompare(a: string, b: string): number {
 // IDs named in the header "Status:" line are the plan's top blockers.
 export function blockerIds(statusLine: string): Set<string> {
 	const set = new Set<string>();
-	for (const m of statusLine.matchAll(/\b([A-Z]{1,5}-?\d+[a-z]?)\b/g)) set.add(m[1]);
+	for (const m of statusLine.matchAll(/\b([A-Z]{1,5}-?\d+(?:-\d+)*[a-z]?)\b/g)) set.add(m[1]);
 	return set;
 }
 
@@ -131,7 +131,7 @@ export function parseLegend(line: string): Partial<Record<StatusClass, string>> 
 	const out: Partial<Record<StatusClass, string>> = {};
 	const body = line.replace(/^.*?Legend:\s*/s, '');
 	for (const part of body.split('·')) {
-		const p = part.trim();
+		const p = part.trim().replace(/^\*+\s*/, ''); // tolerate raw **Legend:** markup
 		const icon = Array.from(p)[0];
 		const cls = icon ? ICON_CLASS[icon] : undefined;
 		if (cls) out[cls] = p;

@@ -54,6 +54,19 @@ Clickable links in the rendered preview — all paths are resolved relative to t
 - Unsaved toggles survive tab switches and are shown in the editor when switching to edit mode; live reload never overwrites them (`F5` asks first)
 - Keyboard: `Space` or `Enter` on a focused checkbox toggles it
 
+### Action Plan View
+A per-tab preview mode for BME action plans (`_Action_Plan_*.md`, or any file with `**Status:**` and `**Legend:**` header lines). Toggle it with the list icon next to the edit button or `Ctrl+Shift+A`; a dot on the icon marks a detected plan.
+- A filter and sort bar above the document works on every table that has a `Status` column (Decision Log, Open Issues, Document status, Consistency Checklist)
+- **Status chips** are the quick filter, one per legend icon (🔴 🟡 🟩 🟢 ⚪) with its row count. Click toggles a chip; `Shift`+click selects only that chip, and `Shift`+click on the sole selected chip brings all back. Entering the view selects 🔴 🟡 🟩, so the first view is open work only. A status cell that cannot be classified counts as ⚪ and gets a small `?` mark with the reason
+- **Sev** chips, an **Owner** type-ahead box (suggestions with counts, `Enter` pins a chip, several chips combine with OR) and a **Find** box (ID or text)
+- **Sort** by status (open first), owner or natural ID, within each table, with a direction toggle; the sorted column header shows an arrow and the track heading a "sorted by" tag. Document order is always the tie-break
+- **Compact** switch: single-line cells with ellipsis and the full text on hover; click a row to expand it
+- A filtered table never looks short: a footer says how many rows are hidden with a per-table **show all**; track headings get a computed `done / open · shown` badge next to the hand-written count; the sticky table header keeps column names in view
+- The reading position is kept on every filter or sort change; the state is remembered per tab while it is open, and every file open starts as plain Markdown
+- DOM-only: the file is never reordered or changed. `Ctrl+F` search skips hidden rows. `Esc` clears the text filters first, then leaves the view
+- No priority: the BME Action Plan Skill defines status vocabularies but no priority field, so the view is built around status
+- Logic lives in `src/lib/utils/actionPlan.ts` (unit tests in `tests/actionPlan.test.mjs`), the DOM adapter in `actionPlanDom.ts`, the bar in `components/ActionPlanBar.svelte`
+
 ### Selection Carry-over (Edit ↔ View)
 - Context-menu Edit snapshots the selection before menu focus changes it and maps
   HTML formatting/entity text to exact source offsets, including repeated phrases.

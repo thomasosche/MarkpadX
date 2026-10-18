@@ -31,6 +31,7 @@
 			rows: [
 				{ keys: `${cmd}+E`, desc: 'Toggle editor / preview' },
 				{ keys: `${cmd}+H`, desc: 'Toggle split view' },
+				{ keys: `${cmd}+Shift+A`, desc: 'Toggle Action Plan view (status filter and sort bar for action-plan tables)' },
 				{ keys: `${cmd}+R  •  F5`, desc: 'Reload current file from disk (preview)' },
 				{ keys: `${cmd}+,`, desc: 'Settings' },
 				{ keys: '?', desc: 'Show this shortcuts dialog' },
