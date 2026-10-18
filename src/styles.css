@@ -1435,3 +1435,20 @@ body {
 		animation-duration: 0.4s;
 	}
 }
+
+/* ---- Action Plan view (see PROPOSAL-action-plan-view.md) ---- */
+.markdown-body tr[hidden] { display: none; }
+.markdown-body.ap-view thead th { position: sticky; top: 0; z-index: 2; }
+.markdown-body.ap-view td.ap-id { white-space: nowrap; }
+.markdown-body.ap-view td.ap-status { white-space: nowrap; }
+.markdown-body.ap-view th.ap-sorted::after { content: " \25B2"; color: var(--color-accent-fg); font-size: 10px; }
+.markdown-body.ap-view th.ap-sorted.ap-desc::after { content: " \25BC"; }
+.markdown-body.ap-compact td:not(.ap-id):not(.ap-status) { max-width: 34ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.markdown-body.ap-compact tr.ap-expanded td { white-space: normal; overflow: visible; }
+.markdown-body.ap-compact tbody tr { cursor: pointer; }
+.markdown-body .ap-foot { font-size: 0.85em; color: var(--color-fg-muted); margin: -8px 0 16px; }
+.markdown-body .ap-foot button { border: none; background: none; color: var(--color-accent-fg); padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+.markdown-body .ap-badge { font-size: 0.7em; font-weight: normal; color: var(--color-accent-fg); border: 1px solid var(--color-accent-fg); border-radius: 999px; padding: 1px 8px; margin-left: 8px; vertical-align: middle; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.markdown-body .ap-sorttag { font-size: 0.7em; font-weight: normal; color: var(--color-fg-muted); margin-left: 6px; vertical-align: middle; }
+.markdown-body .ap-blocker { display: inline-block; background: var(--color-attention-fg, #b45309); color: #fff; border-radius: 3px; font-size: 10px; padding: 0 4px; margin-left: 6px; vertical-align: middle; font-family: var(--win-font); }
+.markdown-body .ap-qmark { display: inline-block; border: 1px dashed var(--color-fg-muted); color: var(--color-fg-muted); border-radius: 999px; font-size: 10px; padding: 0 5px; margin-left: 5px; cursor: help; line-height: 1.4; }
