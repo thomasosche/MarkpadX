@@ -369,3 +369,26 @@ One source of zoom per mode: edit mode → font size = base × zoom, also at cre
 
 **What**
 The `carry` (68 cases) and `reload` (42 cases) suites were moved from a scratch folder into `tests/e2e/` and adapted to the shared harness, but have not been run there yet (`main` 23/23 and `folder` 11/11 have). Run `npm run test:e2e -- carry reload` on a fresh debug build and fix anything the move broke.
+
+---
+
+## I-09 · Action Plan view mode with a dynamic filter and sort bar
+
+- **Status:** idea (proposal written, owner decision pending)
+- **Added:** 2026-10-18
+- **Proposal:** `PROPOSAL-action-plan-view.md` (branch `claude/action-plan-view-d163a815`)
+
+**What**
+- A per-tab preview mode for BME action plans (`_Action_Plan_*.md`): a filter and sort bar above the document that hides done/closed rows (🟢 / ⚪, optionally 🟩), filters by status, severity, owner, table and text, sorts by computed priority / status / owner / ID, and shows live done/open counts per track heading.
+- DOM-only: the Markdown source is never reordered or changed (rows stay in place per the BME Action Plan Skill). Phase 2 adds an in-place status edit per row via `data-sourcepos`, with the task-checkbox safety net and no auto-save.
+
+**Why**
+Six active plans with 20–100+ rows keep closed rows in place as the audit trail, so the file cannot be tidied; the viewer has to.
+
+**Notes (how it could be built)**
+- Pure logic in `src/lib/utils/actionPlan.ts` (tested with `node --test` like `tasks.ts`), DOM adapter in `actionPlanDom.ts`, bar in `ActionPlanBar.svelte`, two hook points in `MarkdownViewer.svelte` (mount in the search-bar slot, re-apply after every render). comrak already emits `data-sourcepos` on `<tr>`.
+- Shortcut Ctrl+Shift+A (free). Additive, so it ports onto the I-03 rebase unchanged.
+- Estimate: phase 1 ~1.5 days, phase 2 ~1 day.
+
+**Open questions**
+See proposal §9: default sort, Hide-done default, Decision Log handling, count badges view-only vs. written back, Tables-only mode phase, shortcut.
