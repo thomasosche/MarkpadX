@@ -27,7 +27,7 @@ export interface PlanModel {
 	blockers: Set<string>;
 }
 
-const CLEAN_SELECTOR = '.ap-foot, .ap-badge, .ap-sorttag, .ap-blocker, .ap-qmark';
+const CLEAN_SELECTOR = '.ap-foot, .ap-badge, .ap-sorttag, .ap-sortcue, .ap-blocker, .ap-qmark';
 
 function headingAbove(table: HTMLTableElement): HTMLElement | null {
 	let el: Element | null = table;
@@ -88,6 +88,7 @@ export interface ApplyResult {
 function clearDecorations(body: HTMLElement) {
 	body.querySelectorAll(CLEAN_SELECTOR).forEach((n) => n.remove());
 	body.querySelectorAll('th.ap-sorted').forEach((th) => th.classList.remove('ap-sorted', 'ap-desc'));
+	body.querySelectorAll('[data-ap-title]').forEach((td) => { td.removeAttribute('title'); td.removeAttribute('data-ap-title'); });
 	body.querySelectorAll('tr[hidden]').forEach((tr) => ((tr as HTMLElement).hidden = false));
 	body.querySelectorAll('.ap-id, .ap-status, .ap-expanded').forEach((n) => n.classList.remove('ap-id', 'ap-status', 'ap-expanded'));
 	body.classList.remove('ap-view', 'ap-compact');
@@ -139,6 +140,14 @@ export function applyPlanView(body: HTMLElement, model: PlanModel, state: Action
 			const tds = r.tr.children;
 			tds[t.idCol]?.classList.add('ap-id');
 			tds[t.statusCol]?.classList.add('ap-status');
+			if (state.compact) {
+				// truncated cells show their full text on hover
+				for (let i = 0; i < tds.length; i++) {
+					if (i === t.idCol) continue;
+					const text = (tds[i].textContent || '').replace(/\s+/g, ' ').trim();
+					if (text) { tds[i].setAttribute('title', text); tds[i].setAttribute('data-ap-title', '1'); }
+				}
+			}
 			if (r.blocker) {
 				const b = document.createElement('span');
 				b.className = 'ap-blocker'; b.textContent = 'blocker'; b.title = 'named as top blocker in the Status line';
@@ -156,7 +165,15 @@ export function applyPlanView(body: HTMLElement, model: PlanModel, state: Action
 		if (state.sort !== 'doc') {
 			const col = state.sort === 'status' ? t.statusCol : state.sort === 'owner' ? t.ownerCol : t.idCol;
 			const th = t.el.querySelectorAll('thead th')[col] as HTMLElement | undefined;
-			if (th) { th.classList.add('ap-sorted'); if (state.dir === 'desc') th.classList.add('ap-desc'); }
+			if (th) {
+				th.classList.add('ap-sorted');
+				if (state.dir === 'desc') th.classList.add('ap-desc');
+				const cue = document.createElement('span');
+				cue.className = 'ap-sortcue';
+				cue.textContent = state.dir === 'desc' ? '▼' : '▲';
+				cue.title = `sorted by ${state.sort}, ${state.dir === 'desc' ? 'descending' : 'ascending'}`;
+				th.appendChild(cue);
+			}
 		}
 		const hidden = t.rows.length - visible;
 		const anchorEl = t.el.parentElement?.classList.contains('table-wrapper') ? t.el.parentElement : t.el;

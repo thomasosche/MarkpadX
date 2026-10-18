@@ -1440,10 +1440,8 @@ body {
 .markdown-body tr[hidden] { display: none; }
 .markdown-body.ap-view thead th { position: sticky; top: 0; z-index: 2; }
 .markdown-body.ap-view td.ap-id { white-space: nowrap; }
-.markdown-body.ap-view td.ap-status { white-space: nowrap; }
-.markdown-body.ap-view th.ap-sorted::after { content: " \25B2"; color: var(--color-accent-fg); font-size: 10px; }
-.markdown-body.ap-view th.ap-sorted.ap-desc::after { content: " \25BC"; }
-.markdown-body.ap-compact td:not(.ap-id):not(.ap-status) { max-width: 34ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.markdown-body.ap-view .ap-sortcue { color: var(--color-accent-fg); font-size: 10px; margin-left: 4px; }
+.markdown-body.ap-compact td:not(.ap-id) { max-width: 34ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .markdown-body.ap-compact tr.ap-expanded td { white-space: normal; overflow: visible; }
 .markdown-body.ap-compact tbody tr { cursor: pointer; }
 .markdown-body .ap-foot { font-size: 0.85em; color: var(--color-fg-muted); margin: -8px 0 16px; }
