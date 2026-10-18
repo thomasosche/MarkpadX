@@ -1,5 +1,6 @@
 import { t } from '../utils/i18n.js';
 import { settings } from './settings.svelte.js';
+import type { ActionPlanViewState } from '../utils/actionPlan.js';
 
 export interface Tab {
 	id: string;
@@ -19,6 +20,8 @@ export interface Tab {
 	isSplit: boolean;
 	splitRatio: number;
 	isScrollSynced: boolean;
+	// Action Plan view state; undefined = plain Markdown. Per tab while open, never restored (see PROPOSAL-action-plan-view.md §4.1)
+	actionPlan?: ActionPlanViewState;
 }
 
 class TabManager {
@@ -48,7 +51,7 @@ class TabManager {
 	serializeState(): string {
 		const stateData = {
 			activeTabId: this.activeTabId,
-			tabs: this.tabs.map(t => ({ ...t, editorViewState: null, content: '' }))
+			tabs: this.tabs.map(t => ({ ...t, editorViewState: null, content: '', actionPlan: undefined }))
 		};
 		return JSON.stringify(stateData);
 	}

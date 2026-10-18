@@ -39,6 +39,9 @@
 		ontoggleEdit,
 		ontoggleSplit,
 		isEditing,
+		ontoggleActionPlan,
+		actionPlanOn = false,
+		actionPlanReady = false,
 		ondetach,
 		ontabclick,
 		zoomLevel,
@@ -75,6 +78,9 @@
 		ontoggleEdit: () => void;
 		ontoggleSplit?: () => void;
 		isEditing: boolean;
+		ontoggleActionPlan?: () => void;
+		actionPlanOn?: boolean;
+		actionPlanReady?: boolean;
 		ondetach: (tabId: string) => void;
 		ontabclick?: () => void;
 		zoomLevel?: number;
@@ -182,7 +188,7 @@
 		}
 	});
 
-	const inlineIds = ['fullWidth', 'edit', 'split', 'sync', 'live'];
+	const inlineIds = ['fullWidth', 'edit', 'actionPlan', 'split', 'sync', 'live'];
 
 	let visibleActionIds = $derived.by(() => {
 		const list: string[] = [];
@@ -206,6 +212,9 @@
 			}
 			if (isMarkdown && !tabManager.activeTab?.isSplit) {
 				list.push('edit');
+			}
+			if (isMarkdown && (!isEditing || tabManager.activeTab?.isSplit)) {
+				list.push('actionPlan');
 			}
 			list.push('zen');
 			list.push('tabs');
@@ -645,6 +654,21 @@
 							><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
 						<span class="action-label">{t('menu.editor', currentLanguage)}</span>
 						<span class="menu-shortcut">{modifier}+E</span>
+					</button>
+				{:else if id === 'actionPlan'}
+					<button
+						class="title-action-btn ap-btn {actionPlanOn ? 'active' : ''}"
+						onclick={ontoggleActionPlan}
+						aria-label={t('tooltip.actionPlan', currentLanguage)}
+						aria-pressed={actionPlanOn}
+						onmouseenter={(e) => showTooltip(e, t('tooltip.actionPlan', currentLanguage), 'Shift+A')}
+						onmousedown={(e) => e.preventDefault()}
+						onmouseleave={hideTooltip}>
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							><path d="M3 6h18" /><path d="M7 12h10" /><path d="M11 18h2" /></svg>
+						<span class="action-label">{t('menu.actionPlan', currentLanguage)}</span>
+						<span class="menu-shortcut">{modifier}+Shift+A</span>
+						{#if actionPlanReady && !actionPlanOn}<span class="ap-ready" title="action plan detected"></span>{/if}
 					</button>
 				{:else if id === 'theme'}
 					<div class="theme-dropdown-container">
@@ -1365,4 +1389,6 @@
 	.home-menu-footer:hover {
 		color: var(--color-fg-default);
 	}
+	.ap-btn { position: relative; }
+	.ap-ready { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent-fg); pointer-events: none; }
 </style>

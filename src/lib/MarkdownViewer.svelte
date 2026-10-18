@@ -21,6 +21,9 @@
 	import ZoomOverlay from './components/ZoomOverlay.svelte';
 import { processMarkdownHtml } from './utils/markdown';
 import { findTaskMarkers, resolveTaskLine, setTaskMarkerOnLine, sourceposLine, taskMarkerOnLine, type RenderedTask } from './utils/tasks.js';
+	import ActionPlanBar from './components/ActionPlanBar.svelte';
+	import { defaultViewState, isActionPlanDoc } from './utils/actionPlan.js';
+	import { applyPlanView, collectPlanModel, keepReadingPosition, type PlanModel } from './utils/actionPlanDom.js';
 import { mapLines, type LineMapping } from './utils/linemap.js';
 	import { pasteIntoTextField } from './utils/clipboard.js';
 	import {
@@ -243,6 +246,57 @@ import { t } from './utils/i18n.js';
 	let previewSearchInputEl = $state<HTMLInputElement | null>(null);
 	let previewSearchHighlights: HTMLElement[] = [];
 
+	// ---- Action Plan view (PROPOSAL-action-plan-view.md): per-tab state lives on the tab, DOM-only ----
+	let apModel = $state.raw<PlanModel>({ tables: [], legend: {}, blockers: new Set() });
+	let apShown = $state(0);
+	let apBar = $state<ActionPlanBar | null>(null);
+	let apOn = $derived(!!tabManager.activeTab?.actionPlan?.on && !(isEditing && !tabManager.activeTab?.isSplit));
+	let apReady = $derived.by(() => {
+		const tab = tabManager.activeTab;
+		return !!tab && tab.path !== '' && isActionPlanDoc(tab.rawContent, tab.path);
+	});
+
+	// Re-read the rendered tables and apply the tab's view state. keep: hold the reading position.
+	function applyActionPlan(keep = true) {
+		const body = markdownBody;
+		if (!body) return;
+		const st = tabManager.activeTab?.actionPlan;
+		const run = () => {
+			if (!st?.on) {
+				if (apModel.tables.length) applyPlanView(body, apModel, null);
+				apModel = { tables: [], legend: {}, blockers: new Set() };
+				return;
+			}
+			apModel = collectPlanModel(body);
+			apShown = applyPlanView(body, apModel, st, () => applyActionPlan()).shown;
+		};
+		keep ? keepReadingPosition(body, body, run) : run();
+	}
+
+	function toggleActionPlanView() {
+		const tab = tabManager.activeTab;
+		if (!tab || (isEditing && !tab.isSplit)) return;
+		if (tab.actionPlan?.on) {
+			tab.actionPlan.on = false;
+			applyActionPlan();
+			markdownBody?.focus();
+		} else {
+			tab.actionPlan = { ...defaultViewState(), on: true };
+			applyActionPlan();
+			apBar?.focusFind();
+		}
+	}
+
+	// Compact rows: click a row to expand it (links, buttons and text selections are left alone)
+	function handleActionPlanRowClick(e: MouseEvent) {
+		if (!apOn || !tabManager.activeTab?.actionPlan?.compact) return;
+		const target = e.target as HTMLElement;
+		if (target.closest('a, button, input')) return;
+		if ((window.getSelection()?.toString() || '').length) return;
+		const tr = target.closest('tbody tr') as HTMLElement | null;
+		tr?.classList.toggle('ap-expanded');
+	}
+
 	async function openPreviewSearch() {
 		// Ctrl+F again while the bar is open: reset the old search and start fresh
 		if (showPreviewSearch) {
@@ -297,6 +351,7 @@ import { t } from './utils/i18n.js';
 
 		let node: Text | null;
 		while ((node = walker.nextNode() as Text | null)) {
+			if (node.parentElement?.closest('tr[hidden]')) continue; // rows hidden by the Action Plan view
 			const text = previewSearchCaseSensitive ? node.textContent! : node.textContent!.toLowerCase();
 			let startPos = 0;
 			let index: number;
@@ -969,6 +1024,7 @@ import { t } from './utils/i18n.js';
 			untrack(() => {
 				const tab = tabManager.activeTab;
 				if (tab?.isDirty && !tab.isEditing) syncTaskCheckboxes(tab.rawContent);
+				applyActionPlan(false);
 				refreshPreviewSearch();
 			});
 		}
@@ -2729,6 +2785,14 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			openPreviewSearch();
 		}
+		if (cmdOrCtrl && e.shiftKey && key === 'a') {
+			e.preventDefault();
+			toggleActionPlanView();
+		}
+		// Esc in the Action Plan view: clear its text filters first, then leave the view (the search bar has priority)
+		if (e.key === 'Escape' && apOn && !showPreviewSearch && !document.querySelector('.modal-content')) {
+			if (!apBar?.escape()) toggleActionPlanView();
+		}
 		if (code === 'F3' && !isEditing) {
 			e.preventDefault();
 			if (!showPreviewSearch) {
@@ -3270,6 +3334,9 @@ import { t } from './utils/i18n.js';
 		ontoggleEdit={() => toggleEdit()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
+		ontoggleActionPlan={toggleActionPlanView}
+		actionPlanOn={apOn}
+		actionPlanReady={apReady}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
 		onresetZoom={() => (zoomLevel = 100)}
@@ -3312,6 +3379,9 @@ import { t } from './utils/i18n.js';
 		ontoggleEdit={() => toggleEdit()}
 		ontoggleSplit={() => tabManager.activeTabId && toggleSplitView(tabManager.activeTabId)}
 		{isEditing}
+		ontoggleActionPlan={toggleActionPlanView}
+		actionPlanOn={apOn}
+		actionPlanReady={apReady}
 		ondetach={handleDetach}
 		ontabclick={() => (showHome = false)}
 		onresetZoom={() => (zoomLevel = 100)}
@@ -3418,12 +3488,15 @@ import { t } from './utils/i18n.js';
 							</div>
 						{/if}
 
+						{#if apOn && tabManager.activeTab?.actionPlan}
+							<ActionPlanBar bind:this={apBar} bind:view={tabManager.activeTab.actionPlan} model={apModel} shown={apShown} onchange={() => applyActionPlan()} onclose={toggleActionPlanView} />
+						{/if}
 						<div class="viewer-content">
 							<article
 								bind:this={markdownBody}
 								contenteditable="false"
 								class="markdown-body {isFullWidth ? 'full-width' : ''} {settings.showToc ? 'toc-active' : ''}"
-								onclick={handleDocumentClick}
+								onclick={(e) => { handleDocumentClick(e); handleActionPlanRowClick(e); }}
 								onkeydown={(e) => { if(e.key === 'Enter' || e.key === ' ') handleDocumentClick(e as unknown as MouseEvent); }}
 								onscroll={handleScroll}
 								tabindex="-1"
