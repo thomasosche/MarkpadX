@@ -5,7 +5,7 @@
 - **Branch:** `claude/action-plan-view-d163a815`
 - **Decided 2026-10-18 (owner):** no priority sort; the view focuses on status, because the BME Action Plan Skill defines status vocabularies but no priority field (§3, §5.4)
 - **Decided 2026-10-18 (owner):** the bar selection is remembered per tab while the tab is open; every file open starts as the plain rendered Markdown with the view off (§4.1)
-- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1)
+- **Decided 2026-10-18 (owner):** count badges on every chip and dropdown (§4.2); shortcut Ctrl+Shift+A (§4.1); a filtered table always shows how many rows are hidden, with a per-table `show all` (§4.2)
 - **Owner decision needed:** the remaining open questions in §9 and the suggestions in §4.3
 
 ---
@@ -85,7 +85,13 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 | **Reset** | Document order, all statuses, no text, Hide done per setting. |
 | **×** | Leaves the view; the document renders as before. |
 
-**Row rendering.** Hidden rows get `hidden` (not removed), sorted rows are re-appended inside their `tbody` in the new order; the original index is kept on each row so document order is restorable without a re-render. A table with no visible rows collapses to its header row plus one muted line `no rows match`. Headings, prose, Gantt annex and everything outside tables are untouched.
+**Row rendering.** Hidden rows get `hidden` (not removed), sorted rows are re-appended inside their `tbody` in the new order; the original index is kept on each row so document order is restorable without a re-render. Headings, prose, Gantt annex and everything outside tables are untouched.
+
+**Never let a filtered table look like a short table** (decided 2026-10-18). Whenever at least one row of a table is hidden, the table shows it explicitly, in three places:
+- a muted footer line directly under the table, `23 of 88 rows hidden · show all`; clicking `show all` reveals that table's rows for this tab without changing the bar (a per-table override, cleared by Reset);
+- the hidden count in the heading badge, `(33 done / 19 open · 19 shown, 33 hidden)`;
+- a table with no visible rows keeps its header row and shows the footer line as `all 88 rows hidden · show all` instead of collapsing silently.
+The footer line is part of the rendered DOM, so it scrolls with the table and is included in copy/paste and print of the view; it is never written to the file.
 
 **Tables-only mode** (optional second toggle in the bar): hides paragraphs, lists and blockquotes between the first `##` section and the Annexes heading, keeping headings and tables — a pure worklist. Off by default; phase 1 if cheap, otherwise phase 2.
 
@@ -93,7 +99,6 @@ One row, wraps on narrow windows, same visual language as the preview search bar
 
 Usability:
 - **Chip click semantics:** plain click = "only this one", Shift+click = add/remove, so the common case is one click.
-- **Filtered tables must not look short:** a muted line under each filtered table, `23 of 88 rows hidden · show`, plus the hidden count in the heading badge.
 - **Dim as a third state** for done rows (low opacity instead of hidden) to keep the audit trail visible while scanning.
 - **Keep the reading position** on every filter change: anchor on the first visible row in the viewport and scroll it back after the apply (reuse the reading-position / line-map code).
 - **"Mine" quick filter:** a setting with the user's owner tokens (`TO`, `PM/TO`, `Thomas Osche`) becomes one chip.
