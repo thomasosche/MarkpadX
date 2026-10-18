@@ -374,7 +374,7 @@ The `carry` (68 cases) and `reload` (42 cases) suites were moved from a scratch 
 
 ## I-09 · Action Plan view mode with a dynamic filter and sort bar
 
-- **Status:** idea (proposal written, owner decision pending)
+- **Status:** in progress — phase 1 implemented on the branch (2026-10-18), owner testing the debug build
 - **Added:** 2026-10-18
 - **Proposal:** `PROPOSAL-action-plan-view.md` (branch `claude/action-plan-view-d163a815`)
 
