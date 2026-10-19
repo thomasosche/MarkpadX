@@ -18,6 +18,7 @@
 		{
 			title: 'File',
 			rows: [
+				{ keys: `${cmd}+O`, desc: 'Open file' },
 				{ keys: `${cmd}+T`, desc: 'Open Home / Recents tab' },
 				{ keys: `${cmd}+W`, desc: 'Close current file / tab' },
 				{ keys: `${cmd}+Shift+W`, desc: 'Close all other tabs' },
