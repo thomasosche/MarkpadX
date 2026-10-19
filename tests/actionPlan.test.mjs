@@ -15,6 +15,7 @@ import {
 	ownerFromCell,
 	parseLegend,
 	rowMatches,
+	sevCompare,
 	sortRows,
 	splitOwners,
 	toggleChip,
@@ -91,8 +92,38 @@ test('naturalIdCompare and sortRows keep document order as the tie-break', () =>
 	assert.ok(naturalIdCompare('G3', 'W1') < 0);
 	const rows = [row(0, { cls: 'done' }), row(1, { cls: 'open' }), row(2, { cls: 'none' }), row(3, { cls: 'open' }), row(4, { cls: 'draft' })];
 	assert.deepEqual(sortRows(rows, 'status', 'asc').map((r) => r.index), [1, 3, 4, 0, 2]);
-	assert.deepEqual(sortRows(rows, 'status', 'desc').map((r) => r.index), [2, 0, 4, 3, 1]);
+	// descending flips the key only: the two open rows (1, 3) keep document order
+	assert.deepEqual(sortRows(rows, 'status', 'desc').map((r) => r.index), [2, 0, 4, 1, 3]);
 	assert.deepEqual(sortRows(rows, 'doc', 'desc').map((r) => r.index), [0, 1, 2, 3, 4]); // document order ignores direction
+});
+
+test('sortRows: equal keys keep document order in both directions (PR #3 review, issue 3)', () => {
+	// Kiran's fixture: G2 and G1 both TO / open, G3 QM / done
+	const rows = [
+		row(0, { id: 'G2', owner: 'TO' }),
+		row(1, { id: 'G1', owner: 'TO' }),
+		row(2, { id: 'G3', owner: 'QM', cls: 'done' }),
+	];
+	const ids = (sort, dir) => sortRows(rows, sort, dir).map((r) => r.id);
+	assert.deepEqual(ids('owner', 'asc'), ['G3', 'G2', 'G1']);
+	assert.deepEqual(ids('owner', 'desc'), ['G2', 'G1', 'G3']);
+	assert.deepEqual(ids('status', 'asc'), ['G2', 'G1', 'G3']);
+	assert.deepEqual(ids('status', 'desc'), ['G3', 'G2', 'G1']);
+	assert.deepEqual(ids('id', 'desc'), ['G3', 'G2', 'G1']);
+	// sorting a sorted copy again gives the same result, and doc order always comes back
+	for (const [s, d] of [['owner', 'desc'], ['id', 'asc'], ['status', 'desc']]) {
+		const once = sortRows(rows, s, d);
+		assert.deepEqual(sortRows(once, s, d).map((r) => r.id), once.map((r) => r.id));
+		assert.deepEqual(sortRows(once, 'doc', 'asc').map((r) => r.id), ['G2', 'G1', 'G3']);
+	}
+});
+
+test('sevCompare: fixed Sev chip order, unknown values after the known ones A-Z (PR #3 review, issue 4)', () => {
+	const order = (list) => [...list].sort(sevCompare);
+	assert.deepEqual(order(['DOC', 'MINOR', 'MAJOR']), ['MAJOR', 'MINOR', 'DOC']);
+	assert.deepEqual(order(['MINOR', 'DOC', 'MAJOR']), ['MAJOR', 'MINOR', 'DOC']);
+	assert.deepEqual(order(['Zeta', 'DOC', 'Alpha', 'Critical']), ['Critical', 'DOC', 'Alpha', 'Zeta']);
+	assert.deepEqual(order(['MEDIUM', 'MAJOR', 'MINOR']), ['MAJOR', 'MEDIUM', 'MINOR']);
 });
 
 test('toggleChip: click toggles, Shift+click = only this, Shift+click again = all back', () => {

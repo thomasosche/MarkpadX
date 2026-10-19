@@ -2,7 +2,7 @@
 // (hide / reorder / footers / badges) and keeps the reading position. Never touches the source.
 import {
 	blockerIds, classifyStatus, classifyTable, cleanId, mapColumns, ownerFromCell, parseLegend, rowMatches,
-	sortRows, splitOwners, STATUS_ICON, type ActionPlanViewState, type PlanRow, type StatusClass, type TableKind,
+	sevCompare, sortRows, splitOwners, STATUS_ICON, type ActionPlanViewState, type PlanRow, type StatusClass, type TableKind,
 } from './actionPlan.js';
 
 export interface DomRow extends PlanRow {
@@ -45,7 +45,10 @@ function headingText(h: HTMLElement | null): string {
 	return s.replace(/\s+/g, ' ').trim();
 }
 
+// Safe to call on an already decorated and sorted view: decorations are stripped first, and each
+// row's document position is stamped on first sight (data-ap-index) and reused after that.
 export function collectPlanModel(body: HTMLElement): PlanModel {
+	clearDecorations(body);
 	const paragraphs = Array.from(body.querySelectorAll('p'));
 	const statusP = paragraphs.find((p) => /^\s*Status:/.test(p.textContent || ''));
 	const legendP = paragraphs.find((p) => /^\s*Legend:/.test(p.textContent || ''));
@@ -59,7 +62,10 @@ export function collectPlanModel(body: HTMLElement): PlanModel {
 		const cols = mapColumns(ths);
 		if (cols.status < 0) return;
 		const trs = Array.from(el.querySelectorAll('tbody tr'));
-		const rows: DomRow[] = trs.map((tr, index) => {
+		const rows: DomRow[] = trs.map((tr, pos) => {
+			const rowEl = tr as HTMLElement;
+			if (rowEl.dataset.apIndex === undefined) rowEl.dataset.apIndex = String(pos);
+			const index = Number(rowEl.dataset.apIndex);
 			const tds = Array.from(tr.children) as HTMLElement[];
 			const cell = (i: number) => (i >= 0 && tds[i] ? tds[i].textContent || '' : '');
 			const id = cleanId(cell(cols.id));
@@ -71,6 +77,7 @@ export function collectPlanModel(body: HTMLElement): PlanModel {
 				text: tds.map((td) => td.textContent || '').join(' ').toLowerCase(), blocker: blockers.has(id),
 			};
 		});
+		rows.sort((a, b) => a.index - b.index);
 		const heading = headingAbove(el);
 		tables.push({
 			index: tables.length, el, kind: classifyTable(ths[cols.id], rows.map((r) => r.id), cols.sev >= 0),
@@ -236,7 +243,7 @@ export function unclassifiableCount(model: PlanModel): number {
 export function sevCounts(model: PlanModel): [string, number][] {
 	const m = new Map<string, number>();
 	for (const t of model.tables) for (const r of t.rows) if (r.sev) m.set(r.sev, (m.get(r.sev) || 0) + 1);
-	return Array.from(m);
+	return Array.from(m).sort((a, b) => sevCompare(a[0], b[0]));
 }
 
 export function ownerCounts(model: PlanModel): [string, number][] {
