@@ -200,14 +200,25 @@ export function rowMatches(row: PlanRow, state: ActionPlanViewState, tableIndex:
 }
 
 // Sorted copy; document order is always the tie-break, so equal keys keep the file's order.
+// Descending flips only the key, never the tie-break.
 export function sortRows<T extends PlanRow>(rows: T[], sort: SortKey, dir: 'asc' | 'desc'): T[] {
-	const out = [...rows];
-	if (sort === 'status') out.sort((a, b) => STATUS_RANK[a.cls] - STATUS_RANK[b.cls] || a.index - b.index);
-	else if (sort === 'owner') out.sort((a, b) => a.owner.localeCompare(b.owner) || a.index - b.index);
-	else if (sort === 'id') out.sort((a, b) => naturalIdCompare(a.id, b.id) || a.index - b.index);
-	else out.sort((a, b) => a.index - b.index);
-	if (sort !== 'doc' && dir === 'desc') out.reverse();
-	return out;
+	const d = dir === 'desc' ? -1 : 1;
+	const key: (a: T, b: T) => number =
+		sort === 'status' ? (a, b) => STATUS_RANK[a.cls] - STATUS_RANK[b.cls]
+		: sort === 'owner' ? (a, b) => a.owner.localeCompare(b.owner)
+		: sort === 'id' ? (a, b) => naturalIdCompare(a.id, b.id)
+		: () => 0;
+	return [...rows].sort((a, b) => d * key(a, b) || a.index - b.index);
+}
+
+// Fixed order for the Sev chips, independent of row order: known severities first, the rest A-Z.
+const SEV_RANK = ['critical', 'high', 'major', 'medium', 'minor', 'low', 'doc', 'obs', 'observation', 'info'];
+
+export function sevCompare(a: string, b: string): number {
+	const ra = SEV_RANK.indexOf(a.toLowerCase());
+	const rb = SEV_RANK.indexOf(b.toLowerCase());
+	if (ra !== rb) return ra < 0 ? 1 : rb < 0 ? -1 : ra - rb;
+	return a.localeCompare(b);
 }
 
 // Number of filters that differ from the entry defaults (shown on the Reset button).
