@@ -2715,6 +2715,11 @@ import { t } from './utils/i18n.js';
 			e.preventDefault();
 			tabManager.addHomeTab();
 		}
+		// Ctrl+O in preview / home; inside Monaco the editor's own file-open action handles it
+		if (cmdOrCtrl && !e.shiftKey && key === 'o' && !(e.target as HTMLElement | null)?.closest?.('.monaco-editor')) {
+			e.preventDefault();
+			selectFile();
+		}
 		if (cmdOrCtrl && key === 'q') {
 			e.preventDefault();
 			import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
